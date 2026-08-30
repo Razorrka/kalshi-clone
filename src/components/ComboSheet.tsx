@@ -23,7 +23,8 @@ export function ComboSheet() {
     (m, [index, side]) => m * store.comboLegMultiplier(index, side),
     1,
   );
-  const canPlace = picks.length >= 2 && stake > 0 && stake <= store.balance;
+  const canPlace =
+    picks.length >= 2 && stake > 0 && stake <= store.balance && !store.feedDown;
 
   const submit = () => {
     const result = store.placeCombo(stake);
@@ -68,7 +69,7 @@ export function ComboSheet() {
         const endsAt = (index + 1) * store.roundMs;
         const pick = store.comboDraft.get(index);
         const isCurrent = index === store.round.index;
-        const disabled = isCurrent && store.isLocked;
+        const disabled = (isCurrent && store.isLocked) || store.feedDown;
         return (
           <div className="combo-round" key={index}>
             <div className="cr-head">
@@ -84,7 +85,7 @@ export function ComboSheet() {
                 </div>
               </div>
               <div className="cr-sub tnum">
-                {fmtMultiplier(store.comboLegMultiplier(index, pick ?? 'up'))}
+                {pick ? fmtMultiplier(store.comboLegMultiplier(index, pick)) : '—'}
               </div>
             </div>
             <div className="combo-picks">

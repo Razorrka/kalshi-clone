@@ -5,7 +5,8 @@ import { Book, ComboMark } from './icons';
 
 export function TradeArea() {
   const store = useMarket(true);
-  const locked = store.isLocked;
+  const down = store.feedDown || store.awaitingFeed;
+  const locked = !store.canTrade;
   const upStake = store.stakeOn('up');
   const downStake = store.stakeOn('down');
   const comboCount = store.openCombos.length;
@@ -26,7 +27,13 @@ export function TradeArea() {
             disabled={locked}
             onClick={() => store.openSheet('ticket', 'up')}
           >
-            {locked ? 'Locked' : `Up · ${store.quote.upPct}%`}
+            {down
+              ? store.feedDown
+                ? 'Offline'
+                : 'Connecting'
+              : locked
+                ? 'Locked'
+                : `Up · ${store.quote.upPct}%`}
           </button>
           <div className="bet-sub tnum">{fmtMultiplier(store.quote.upMultiplier)}</div>
           {upStake > 0 && (
@@ -42,7 +49,13 @@ export function TradeArea() {
             disabled={locked}
             onClick={() => store.openSheet('ticket', 'down')}
           >
-            {locked ? 'Locked' : `Down · ${store.quote.downPct}%`}
+            {down
+              ? store.feedDown
+                ? 'Offline'
+                : 'Connecting'
+              : locked
+                ? 'Locked'
+                : `Down · ${store.quote.downPct}%`}
           </button>
           <div className="bet-sub tnum">{fmtMultiplier(store.quote.downMultiplier)}</div>
           {downStake > 0 && (
@@ -53,13 +66,28 @@ export function TradeArea() {
         </div>
       </div>
 
-      {locked && (
+      {store.feedDown ? (
         <div
           className="note"
-          style={{ textAlign: 'center', marginTop: 10, color: 'var(--muted)' }}
+          style={{ textAlign: 'center', marginTop: 10, color: 'var(--down)' }}
         >
-          Picks close {LOCK_MS / 1000}s before settlement
+          No live BTC price to settle against.{' '}
+          <button
+            style={{ color: 'inherit', textDecoration: 'underline', fontWeight: 800 }}
+            onClick={() => store.setMode('sim')}
+          >
+            Switch to JIT Coin
+          </button>
         </div>
+      ) : (
+        locked && (
+          <div
+            className="note"
+            style={{ textAlign: 'center', marginTop: 10, color: 'var(--muted)' }}
+          >
+            Picks close {LOCK_MS / 1000}s before settlement
+          </div>
+        )
       )}
 
       <button className="combo-bar" onClick={() => store.openSheet('combo')}>

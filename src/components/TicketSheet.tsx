@@ -47,7 +47,7 @@ export function TicketSheet() {
     store.closeSheet();
   };
 
-  const disabled = stake <= 0 || stake > store.balance || store.isLocked;
+  const disabled = stake <= 0 || stake > store.balance || !store.canTrade;
 
   return (
     <Sheet
@@ -66,9 +66,11 @@ export function TicketSheet() {
             disabled={disabled}
             onClick={submit}
           >
-            {store.isLocked
-              ? 'Market locked'
-              : `${side === 'up' ? 'Up' : 'Down'} · ${fmtMoney(stake)} to win ${fmtMoney(toWin)}`}
+            {store.feedDown
+              ? 'Feed offline'
+              : store.isLocked
+                ? 'Market locked'
+                : `${side === 'up' ? 'Up' : 'Down'} · ${fmtMoney(stake)} to win ${fmtMoney(toWin)}`}
           </button>
           {error && <div className="form-error">{error}</div>}
         </>

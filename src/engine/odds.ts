@@ -32,10 +32,14 @@ export function probUp(
  * Payout multiplier for a side quoted at probability `p`.
  * Fair odds are 1/p; the edge is taken out of the winnings, not the stake,
  * which is how these apps quote it (49% -> 1.93x).
+ *
+ * The only clamp is the same 1%–99% band the displayed percentage uses, so a
+ * side shown at 1% really does pay what 1% is worth. A tighter cap would quote
+ * a number the percentage beside it contradicts.
  */
 export function multiplierFor(p: number, edge = HOUSE_EDGE): number {
   const q = clamp(p, 0.01, 0.99);
-  return clamp(1 + ((1 - q) / q) * (1 - edge), 1.01, 25);
+  return Math.max(1.01, 1 + ((1 - q) / q) * (1 - edge));
 }
 
 /** Percent shown on the button: rounded, complementary, never 0 or 100. */

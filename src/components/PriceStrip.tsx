@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, Info } from './icons';
 
 export function PriceStrip() {
   const store = useMarket(true);
+  const waiting = store.awaitingFeed;
   const delta = store.price - store.round.strike;
   const above = delta >= 0;
   const flash =
@@ -13,17 +14,23 @@ export function PriceStrip() {
     <div className="price-strip">
       <div className="price-col">
         <div className="label">Target · {fmtTargetTime(store.round.endsAt)}</div>
-        <div className="value tnum">{fmtUsd(store.round.strike)}</div>
+        <div className="value tnum">{waiting ? '—' : fmtUsd(store.round.strike)}</div>
       </div>
 
       <div className="vrule" />
 
       <div className="price-col">
-        <div className={`label delta ${above ? 'up' : 'down'}`}>
-          Now {above ? <ArrowUp size={14} /> : <ArrowDown size={14} />}{' '}
-          <span className="tnum">{fmtUsd(Math.abs(delta))}</span>
+        {waiting ? (
+          <div className="label dim">Waiting for feed</div>
+        ) : (
+          <div className={`label delta ${above ? 'up' : 'down'}`}>
+            Now {above ? <ArrowUp size={14} /> : <ArrowDown size={14} />}{' '}
+            <span className="tnum">{fmtUsd(Math.abs(delta))}</span>
+          </div>
+        )}
+        <div className={`value tnum ${waiting ? '' : flash}`}>
+          {waiting ? '—' : fmtUsd(store.price)}
         </div>
-        <div className={`value tnum ${flash}`}>{fmtUsd(store.price)}</div>
       </div>
 
       <button

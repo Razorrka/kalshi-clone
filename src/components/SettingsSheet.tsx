@@ -80,8 +80,9 @@ export function SettingsSheet() {
           <div className="grow">
             <div className="k">Volatility</div>
             <div className="d">
-              How hard the simulated tape moves, as annualised volatility. Only affects
-              JIT Coin — live BTC moves how it moves.
+              How hard the simulated tape moves, as annualised volatility. JIT Coin
+              only — live BTC is priced off its own realized volatility, measured
+              from the tape.
             </div>
           </div>
         </div>

@@ -20,7 +20,7 @@ export function ActivitySheet() {
         played.length > 0 ? (
           <>
             {wins}/{played.length} rounds green · net{' '}
-            <span className={totalPnl >= 0 ? 'up' : 'down'}>
+            <span className={totalPnl >= 0 ? 'txt-up' : 'txt-down'}>
               {totalPnl >= 0 ? '+' : '−'}
               {fmtMoney(Math.abs(totalPnl))}
             </span>

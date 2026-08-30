@@ -18,12 +18,7 @@ export function OrderBookSheet() {
   return (
     <Sheet
       title="Order book"
-      subtitle={
-        <>
-          Contracts settle at $1.00 · spread {book.spreadCents}¢
-          {book.lastTradeCents !== null && ` · last ${book.lastTradeCents}¢`}
-        </>
-      }
+      subtitle="Contracts settle at $1.00"
       onClose={() => store.closeSheet()}
     >
       <div className="book-stats">
@@ -32,18 +27,20 @@ export function OrderBookSheet() {
           <div className="v tnum" style={{ color: 'var(--up)' }}>
             {store.quote.upPct}%
           </div>
+          <div className="s tnum">{fmtMultiplier(store.quote.upMultiplier)}</div>
         </div>
         <div className="stat">
           <div className="k">Down</div>
           <div className="v tnum" style={{ color: 'var(--down)' }}>
             {store.quote.downPct}%
           </div>
+          <div className="s tnum">{fmtMultiplier(store.quote.downMultiplier)}</div>
         </div>
         <div className="stat">
-          <div className="k">Payout</div>
-          <div className="v tnum">
-            {fmtMultiplier(store.quote.upMultiplier)} /{' '}
-            {fmtMultiplier(store.quote.downMultiplier)}
+          <div className="k">Spread</div>
+          <div className="v tnum">{book.spreadCents}¢</div>
+          <div className="s tnum">
+            {book.lastTradeCents !== null ? `last ${book.lastTradeCents}¢` : 'no trades'}
           </div>
         </div>
       </div>
@@ -69,7 +66,7 @@ export function OrderBookSheet() {
             </div>
             <div className="book-price tnum">
               {up && <span className="book-price up">{up.cents}¢</span>}
-              {up && down && ' / '}
+              {up && down && <span className="sep">/</span>}
               {down && <span className="book-price down">{down.cents}¢</span>}
             </div>
             <div className="book-cell down right">

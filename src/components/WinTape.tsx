@@ -13,35 +13,3 @@ export function WinTape() {
     </div>
   );
 }
-
-export function FeedPill() {
-  const store = useMarket();
-  if (store.mode === 'sim') {
-    return (
-      <div className="feed-pill">
-        <i className="dot" />
-        Simulated
-      </div>
-    );
-  }
-  const cls =
-    store.feedStatus === 'live'
-      ? 'live'
-      : store.feedStatus === 'error'
-        ? 'bad'
-        : 'warn';
-  const text =
-    store.feedStatus === 'live'
-      ? 'Live BTC'
-      : store.feedStatus === 'error'
-        ? 'Feed offline'
-        : store.feedStatus === 'reconnecting'
-          ? 'Reconnecting'
-          : 'Connecting';
-  return (
-    <div className={`feed-pill ${cls}`} title={store.feedDetail}>
-      <i className="dot" />
-      {text}
-    </div>
-  );
-}

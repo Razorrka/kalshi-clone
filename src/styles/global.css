@@ -253,7 +253,7 @@ input {
 }
 
 .price-col .label {
-  font-size: 16px;
+  font-size: clamp(13px, 4.6cqw, 16px);
   font-weight: 700;
   color: #d6d9de;
   white-space: nowrap;
@@ -341,7 +341,10 @@ input {
   font-weight: 800;
   letter-spacing: -0.3px;
   color: var(--up);
-  text-shadow: 0 0 18px rgba(0, 0, 0, 0.9);
+  text-shadow:
+    0 0 4px rgba(0, 0, 0, 0.95),
+    0 0 14px rgba(0, 0, 0, 0.9),
+    0 0 24px rgba(0, 0, 0, 0.7);
   animation: tape-in 0.45s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 
@@ -356,51 +359,26 @@ input {
   }
 }
 
-.feed-pill {
-  position: absolute;
-  top: 6px;
-  left: 23px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  opacity: 0.8;
-  border-radius: var(--radius-pill);
-  background: rgba(18, 20, 23, 0.85);
-  border: 1px solid var(--line);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.feed-pill .dot {
-  width: 6px;
-  height: 6px;
+.feed-dot {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
+  flex: none;
   background: var(--muted-2);
 }
 
-.feed-pill.live .dot {
+.feed-dot.live {
   background: var(--up);
   box-shadow: 0 0 8px var(--up);
-  animation: pulse-soft 1.6s ease-in-out infinite;
+  animation: pulse-soft 1.8s ease-in-out infinite;
 }
 
-.feed-pill.warn {
-  color: var(--accent);
-}
-
-.feed-pill.warn .dot {
+.feed-dot.warn {
   background: var(--accent);
+  animation: pulse-soft 1s ease-in-out infinite;
 }
 
-.feed-pill.bad {
-  color: var(--down);
-}
-
-.feed-pill.bad .dot {
+.feed-dot.bad {
   background: var(--down);
 }
 
@@ -729,7 +707,7 @@ input {
 
 .book-head {
   display: grid;
-  grid-template-columns: 1fr 76px 1fr;
+  grid-template-columns: 1fr 96px 1fr;
   gap: 8px;
   font-size: 11px;
   font-weight: 800;
@@ -749,7 +727,7 @@ input {
 
 .book-row {
   display: grid;
-  grid-template-columns: 1fr 76px 1fr;
+  grid-template-columns: 1fr 96px 1fr;
   gap: 8px;
   align-items: center;
   height: 34px;
@@ -796,7 +774,13 @@ input {
 .book-price {
   text-align: center;
   font-weight: 800;
-  font-size: 15px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.book-price .sep {
+  color: var(--muted-2);
+  margin: 0 2px;
 }
 
 .book-price.up {
@@ -833,6 +817,15 @@ input {
   font-size: 17px;
   font-weight: 800;
   margin-top: 4px;
+  white-space: nowrap;
+}
+
+.stat .s {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-top: 2px;
+  white-space: nowrap;
 }
 
 /* ------------------------------------------------------------- ticket */
@@ -1203,10 +1196,10 @@ input {
 
 .toast {
   position: absolute;
-  left: 16px;
-  right: 16px;
-  top: max(58px, calc(env(safe-area-inset-top) + 46px));
-  z-index: 30;
+  left: 12px;
+  right: 12px;
+  top: 8px;
+  z-index: 15;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1262,6 +1255,14 @@ input {
 
 .toast.loss .mark {
   background: rgba(255, 77, 94, 0.16);
+  color: var(--down);
+}
+
+.txt-up {
+  color: var(--up);
+}
+
+.txt-down {
   color: var(--down);
 }
 

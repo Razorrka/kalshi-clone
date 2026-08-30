@@ -5,7 +5,7 @@ import { fmtAxis } from '../lib/format';
 import { niceStep } from '../lib/math';
 
 const GUTTER = 86; // right-hand strip reserved for the price axis
-const PAD_TOP = 26;
+const PAD_TOP = 34;
 const PAD_BOTTOM = 18;
 const LINE = '#ff9f19';
 
@@ -68,6 +68,8 @@ export function PriceChart() {
       const anim = performance.now();
 
       ctx.clearRect(0, 0, width, height);
+      // Live mode with no price yet: nothing true to draw.
+      if (market.awaitingFeed) return;
 
       const plotRight = width - GUTTER;
       const plotTop = PAD_TOP;
@@ -143,6 +145,11 @@ export function PriceChart() {
 
       const yOf = (p: number) => plotBottom - ((p - lo) / span) * plotHeight;
 
+      const strikeY = yOf(strike);
+      const pinnedUp = strikeY < plotTop;
+      const pinnedDown = strikeY > plotBottom;
+      const ty = pinnedUp ? plotTop : pinnedDown ? plotBottom : strikeY;
+
       // ---- price axis on the right ---------------------------------------
       const step = niceStep(span / 3.4);
       ctx.font = '600 14px ' + getComputedStyle(document.body).fontFamily;
@@ -153,22 +160,22 @@ export function PriceChart() {
       for (let v = first; v <= hi - pad * 0.3; v += step) {
         const y = yOf(v);
         if (y < plotTop - 4 || y > plotBottom + 4) continue;
+        // The target line runs the full width, so a tick that lands on it
+        // would be struck through. The tick is the one that yields.
+        if (Math.abs(y - ty) < 13) continue;
         ctx.fillText(fmtAxis(v, step), width - 12, y);
       }
 
       // ---- target line ----------------------------------------------------
-      const strikeY = yOf(strike);
-      const pinnedUp = strikeY < plotTop;
-      const pinnedDown = strikeY > plotBottom;
-      const ty = pinnedUp ? plotTop : pinnedDown ? plotBottom : strikeY;
-      const label = 'TARGET';
       ctx.font = '800 13px ' + getComputedStyle(document.body).fontFamily;
       ctx.textAlign = 'left';
-      const chev = pinnedUp ? ' ⌃' : pinnedDown ? ' ⌄' : '';
-      const labelText = label + chev;
       ctx.letterSpacing = '1.4px';
-      const labelWidth = ctx.measureText(labelText).width;
-      const labelX = (plotRight - labelWidth) / 2;
+      const labelWidth = ctx.measureText('TARGET').width;
+      // A chevron marks a target that has run off the top or bottom of the
+      // frame. Drawn rather than typed, so no font has to own the glyph.
+      const chevWidth = pinnedUp || pinnedDown ? 15 : 0;
+      const labelX = (plotRight - labelWidth - chevWidth) / 2;
+      const gapEnd = labelX + labelWidth + chevWidth;
 
       ctx.save();
       ctx.strokeStyle = 'rgba(255,255,255,0.34)';
@@ -177,15 +184,33 @@ export function PriceChart() {
       ctx.beginPath();
       ctx.moveTo(0, ty);
       ctx.lineTo(labelX - 14, ty);
-      ctx.moveTo(labelX + labelWidth + 14, ty);
+      ctx.moveTo(gapEnd + 14, ty);
       ctx.lineTo(width, ty);
       ctx.stroke();
       ctx.restore();
 
       ctx.fillStyle = '#aab1bb';
       ctx.textBaseline = 'middle';
-      ctx.fillText(labelText, labelX, ty);
+      ctx.fillText('TARGET', labelX, ty);
       ctx.letterSpacing = '0px';
+
+      if (chevWidth) {
+        // Points the way the target lies: up when it is above the frame.
+        const cx = labelX + labelWidth + 8;
+        const shoulderY = ty + (pinnedUp ? 2 : -2);
+        const tipY = ty + (pinnedUp ? -3 : 3);
+        ctx.save();
+        ctx.strokeStyle = '#aab1bb';
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(cx - 4.5, shoulderY);
+        ctx.lineTo(cx, tipY);
+        ctx.lineTo(cx + 4.5, shoulderY);
+        ctx.stroke();
+        ctx.restore();
+      }
 
       // ---- entry markers for open tickets ---------------------------------
       for (const pos of market.openPositions) {

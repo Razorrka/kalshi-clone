@@ -6,7 +6,7 @@ import { TopBar } from './components/TopBar';
 import { MarketHeader } from './components/MarketHeader';
 import { PriceStrip } from './components/PriceStrip';
 import { PriceChart } from './components/PriceChart';
-import { FeedPill, WinTape } from './components/WinTape';
+import { WinTape } from './components/WinTape';
 import { ControlsRow } from './components/ControlsRow';
 import { TradeArea } from './components/TradeButtons';
 import { OrderBookSheet } from './components/OrderBookSheet';
@@ -35,14 +35,12 @@ export default function App() {
           <div className="chart-wrap">
             <PriceChart />
             <WinTape />
-            <FeedPill />
+            <ResultToast />
           </div>
           <ControlsRow />
           <TradeArea />
           <div className="home-bar" />
         </div>
-
-        <ResultToast />
 
         {store.sheet === 'book' && <OrderBookSheet />}
         {store.sheet === 'ticket' && <TicketSheet />}

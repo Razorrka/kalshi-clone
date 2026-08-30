@@ -7,6 +7,27 @@ function roundLabel(ms: number): string {
   return ROUND_LENGTHS.find((r) => r.ms === ms)?.label ?? `${Math.round(ms / 60000)} min`;
 }
 
+/** Connection state for the live feed: green streaming, amber trying, red out. */
+function FeedDot() {
+  const store = useMarket();
+  const state =
+    store.feedStatus === 'live'
+      ? 'live'
+      : store.feedStatus === 'error'
+        ? 'bad'
+        : 'warn';
+  const label =
+    state === 'live' ? 'Live feed' : state === 'bad' ? 'Feed offline' : 'Connecting';
+  return (
+    <span
+      className={`feed-dot ${state}`}
+      role="status"
+      aria-label={label}
+      title={store.feedDetail ? `${label} — ${store.feedDetail}` : label}
+    />
+  );
+}
+
 export function MarketHeader() {
   const store = useMarket(true);
   const live = store.mode === 'live';
@@ -24,6 +45,7 @@ export function MarketHeader() {
       <span className={`countdown tnum${urgent ? ' urgent' : ''}`}>
         {fmtClock(msLeft)}
       </span>
+      {live && <FeedDot />}
       <span className="spacer" />
       <button
         className="circ"

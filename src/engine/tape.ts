@@ -26,7 +26,7 @@ export class TapeSim {
     if (now < this.nextAt) return null;
     this.nextAt = now + this.rng.range(350, 2200);
 
-    const magnitude = Math.exp(this.rng.normal() * 1.05 + 1.9);
+    const magnitude = Math.exp(this.rng.normal() * 0.85 + 1.75);
     const amount = Math.max(1, Math.round(magnitude));
     // Winners skew toward whichever side is currently favoured.
     const side: Side = this.rng.chance(pUp) ? 'up' : 'down';

@@ -3,6 +3,7 @@ import { LiveFeed } from '../engine/liveFeed';
 import { OrderBookSim, type OrderBookSnapshot } from '../engine/orderBook';
 import { TapeSim, type TapeEntry } from '../engine/tape';
 import { LOCK_MS, displayPercents, multiplierFor, probUp } from '../engine/odds';
+import { SECONDS_PER_YEAR, clamp } from '../lib/math';
 import { DEFAULT_ROUND_MS, makeRound, roundBounds, settleRound } from '../engine/rounds';
 import type {
   ComboLeg,
@@ -101,8 +102,8 @@ export class MarketStore {
   private livePrice = 0;
   private fastListeners = new Set<Listener>();
   private slowListeners = new Set<Listener>();
+  private volEstimateAt = 0;
   private lastFastEmit = 0;
-  private fastQueued = false;
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private toastSeq = 1;
   private idSeq = 1;
@@ -153,12 +154,8 @@ export class MarketStore {
 
   private emitFast() {
     const now = Date.now();
-    if (now - this.lastFastEmit < 70) {
-      this.fastQueued = true;
-      return;
-    }
+    if (now - this.lastFastEmit < 70) return;
     this.lastFastEmit = now;
-    this.fastQueued = false;
     for (const l of this.fastListeners) l();
   }
 
@@ -176,8 +173,14 @@ export class MarketStore {
     if (this.loop) return;
     this.lastStepAt = Date.now();
     this.lastSampleAt = 0;
-    if (this.series.length === 0) this.seedSyntheticHistory();
-    if (this.mode === 'live') this.connectLive();
+    if (this.mode === 'live') {
+      // Live history comes from the exchange; seeding simulated points here
+      // would splice a fake segment onto the front of the real tape.
+      this.connectLive();
+    } else if (this.series.length === 0) {
+      this.seedSyntheticHistory();
+    }
+    this.voidUnsettled(Date.now());
     this.loop = setInterval(() => this.tick(), 60);
   }
 
@@ -189,8 +192,8 @@ export class MarketStore {
   }
 
   /**
-   * Pre-fills the chart by running the engine backwards from "now" so the
-   * first frame is a real chart instead of a single dot.
+   * Pre-fills the chart with a warm-up run so the first frame is a real chart
+   * rather than a single dot.
    */
   private seedSyntheticHistory() {
     const now = Date.now();
@@ -204,11 +207,11 @@ export class MarketStore {
     for (let i = 0; i < steps; i++) {
       points.push({ t: now - SERIES_WINDOW_MS + i * SAMPLE_MS, p: warm.step(SAMPLE_MS) });
     }
-    // Re-anchor so the warm-up ends exactly where the live engine begins.
-    const drift = this.price - warm.price;
-    for (let i = 0; i < points.length; i++) {
-      points[i].p = Math.round((points[i].p + drift * (i / points.length)) * 100) / 100;
-    }
+    // Shift the whole run so it ends exactly where the live engine begins.
+    // A constant offset preserves the shape; tapering it per point would pin
+    // both ends of the window to the same price and read as a repeating arc.
+    const offset = this.price - warm.price;
+    for (const pt of points) pt.p = Math.round((pt.p + offset) * 100) / 100;
     this.series = points;
     const bounds = roundBounds(now, this.roundMs);
     this.round = { ...this.round, strike: this.priceAt(bounds.startsAt) };
@@ -220,18 +223,40 @@ export class MarketStore {
 
   private tick() {
     const now = Date.now();
-    const dt = Math.min(now - this.lastStepAt, 2_000);
+    const gap = now - this.lastStepAt;
     this.lastStepAt = now;
+
+    // Browsers throttle timers in background tabs, so a returning user can be
+    // minutes behind. Run the process forward across the gap instead of
+    // teleporting the price.
+    if (gap > 3_000 && this.mode === 'sim') {
+      this.catchUp(now, gap);
+      this.maybeRollRound(now);
+      this.recompute(now);
+      this.emitSlow();
+      return;
+    }
+    const dt = Math.min(gap, 2_000);
 
     if (this.mode === 'sim') {
       const next = this.engine.step(dt);
       this.setPrice(next);
       this.annualVol = this.engine.vol;
-    } else if (this.livePrice > 0) {
-      this.setPrice(this.livePrice);
+    } else {
+      if (this.livePrice > 0) this.setPrice(this.livePrice);
+      if (now - this.volEstimateAt > 5_000) {
+        this.volEstimateAt = now;
+        const est = this.estimateAnnualVol(now);
+        // Blend, so a refreshed estimate nudges the odds instead of jumping them.
+        if (est !== null) this.annualVol = this.annualVol * 0.7 + est * 0.3;
+      }
     }
 
-    if (now - this.lastSampleAt >= SAMPLE_MS) {
+    // Before the first live tick lands, `price` still holds the simulator's
+    // last value. Sampling it would splice a fake segment into the real tape.
+    const priceIsReal = this.mode === 'sim' || this.livePrice > 0;
+
+    if (priceIsReal && now - this.lastSampleAt >= SAMPLE_MS) {
       this.lastSampleAt = now;
       this.series.push({ t: now, p: this.price });
       this.trimSeries(now);
@@ -250,7 +275,21 @@ export class MarketStore {
 
     if (rolled) this.emitSlow();
     else this.emitFast();
-    if (this.fastQueued) this.emitFast();
+  }
+
+  /** Advance the simulation across a long gap, filling the tape as it goes. */
+  private catchUp(now: number, gapMs: number) {
+    const capped = Math.min(gapMs, SERIES_WINDOW_MS);
+    const steps = Math.min(2_000, Math.max(1, Math.ceil(capped / 1_000)));
+    const stepMs = capped / steps;
+    const from = now - capped;
+    for (let i = 1; i <= steps; i++) {
+      this.series.push({ t: from + i * stepMs, p: this.engine.step(stepMs) });
+    }
+    this.annualVol = this.engine.vol;
+    this.setPrice(this.engine.price);
+    this.lastSampleAt = now;
+    this.trimSeries(now);
   }
 
   private setPrice(next: number) {
@@ -271,6 +310,46 @@ export class MarketStore {
       // Keep one point before the cutoff so the line still reaches the edge.
       if (i > 1) this.series.splice(0, i - 1);
     }
+  }
+
+  /**
+   * Realized annualised volatility from the tape itself, used to price the
+   * live market — the simulator knows its own vol, but real BTC does not
+   * announce it.
+   *
+   * Sampling on a fixed 5s grid keeps this unbiased even when the underlying
+   * data is coarser (seeded 1-minute candles): variance adds linearly in
+   * time, so spreading one minute's move across twelve grid steps recovers
+   * the same per-step variance.
+   */
+  private estimateAnnualVol(now: number): number | null {
+    const s = this.series;
+    if (s.length < 8) return null;
+    const stepMs = 5_000;
+    const from = Math.max(s[0].t, now - 10 * 60_000);
+    const steps = Math.floor((now - from) / stepMs);
+    if (steps < 12) return null;
+
+    let sum = 0;
+    let sumSq = 0;
+    let count = 0;
+    let prev = this.priceAt(from);
+    for (let i = 1; i <= steps; i++) {
+      const p = this.priceAt(from + i * stepMs);
+      if (p > 0 && prev > 0) {
+        const r = Math.log(p / prev);
+        sum += r;
+        sumSq += r * r;
+        count += 1;
+      }
+      prev = p;
+    }
+    if (count < 12) return null;
+
+    const mean = sum / count;
+    const variance = Math.max(0, sumSq / count - mean * mean);
+    const annual = Math.sqrt(variance) * Math.sqrt(SECONDS_PER_YEAR / (stepMs / 1000));
+    return clamp(annual, 0.05, 3);
   }
 
   private recompute(now: number) {
@@ -305,8 +384,42 @@ export class MarketStore {
     this.settlePositions(settled);
     this.round = makeRound(now, this.roundMs, this.price);
     this.pruneComboDraft();
+    this.voidUnsettled(now);
     this.queueSave();
     return true;
+  }
+
+  /**
+   * Anything still open on a round that has already gone by can never be
+   * settled honestly — there is no price path for it. Refund those stakes.
+   * This happens when rounds elapse with the app closed or backgrounded.
+   */
+  private voidUnsettled(now: number) {
+    let refunded = 0;
+    this.positions = this.positions.filter((p) => {
+      if (p.status === 'open' && p.roundEndsAt <= now && p.roundId !== this.round.id) {
+        refunded += p.stake;
+        return false;
+      }
+      return true;
+    });
+    this.combos = this.combos.filter((c) => {
+      if (c.status !== 'open') return true;
+      // Legs resolve in order, so more past legs than wins means one was skipped.
+      const elapsed = c.legs.filter((l) => l.roundIndex < this.round.index).length;
+      if (elapsed > c.legsWon) {
+        refunded += c.stake;
+        return false;
+      }
+      return true;
+    });
+    if (refunded <= 0) return;
+    this.balanceCents += Math.round(refunded * 100);
+    this.showToast({
+      kind: 'info',
+      title: 'Picks refunded',
+      detail: `$${refunded.toFixed(2)} returned — those rounds closed while you were away`,
+    });
   }
 
   /** Nearest sampled price at or before `ts`, falling back to the last price. */
@@ -434,7 +547,7 @@ export class MarketStore {
         id: this.toastSeq++,
         kind: 'info',
         title: 'Open picks refunded',
-        detail: `$${refunded.toFixed(2)} returned — the round closed while you were away`,
+        detail: `$${refunded.toFixed(2)} returned — open picks do not survive a reload`,
       };
     }
   }
@@ -453,6 +566,20 @@ export class MarketStore {
 
   get isLocked(): boolean {
     return this.msLeft <= LOCK_MS;
+  }
+
+  /** A live market with no feed has no price to settle against. */
+  get feedDown(): boolean {
+    return this.mode === 'live' && this.feedStatus === 'error';
+  }
+
+  /** Live mode, connected or not, but no real price has arrived yet. */
+  get awaitingFeed(): boolean {
+    return this.mode === 'live' && this.livePrice <= 0;
+  }
+
+  get canTrade(): boolean {
+    return !this.isLocked && !this.feedDown && !this.awaitingFeed;
   }
 
   get openPositions(): Position[] {
@@ -482,6 +609,7 @@ export class MarketStore {
   placeBet(side: Side, stake: number): { ok: boolean; error?: string } {
     const amount = Math.round(stake * 100) / 100;
     if (!(amount > 0)) return { ok: false, error: 'Enter an amount' };
+    if (this.feedDown) return { ok: false, error: 'No live price — feed is offline' };
     if (this.isLocked) return { ok: false, error: 'Market locked for settlement' };
     if (Math.round(amount * 100) > this.balanceCents) {
       return { ok: false, error: 'Not enough balance' };
@@ -517,6 +645,7 @@ export class MarketStore {
     if (Math.round(amount * 100) > this.balanceCents) {
       return { ok: false, error: 'Not enough balance' };
     }
+    if (this.feedDown) return { ok: false, error: 'No live price — feed is offline' };
     if (this.isLocked && entries.some(([i]) => i === this.round.index)) {
       return { ok: false, error: 'This round is locked' };
     }
@@ -586,11 +715,35 @@ export class MarketStore {
   // settings
   // =========================================================================
 
+  /**
+   * Open tickets belong to one price source and one round grid. Changing
+   * either would leave them settling against something they were never
+   * priced on, so they are handed back instead.
+   */
+  private refundOpenTickets(reason: string) {
+    let refunded = 0;
+    for (const p of this.positions) if (p.status === 'open') refunded += p.stake;
+    for (const c of this.combos) if (c.status === 'open') refunded += c.stake;
+    if (refunded <= 0) return;
+    this.balanceCents += Math.round(refunded * 100);
+    this.positions = this.positions.filter((p) => p.status !== 'open');
+    this.combos = this.combos.filter((c) => c.status !== 'open');
+    this.showToast({
+      kind: 'info',
+      title: 'Open picks refunded',
+      detail: `$${refunded.toFixed(2)} returned — ${reason}`,
+    });
+  }
+
   setMode(mode: FeedMode) {
     if (mode === this.mode) return;
+    this.refundOpenTickets('the price source changed');
     this.mode = mode;
+    this.livePrice = 0;
     this.series = [];
     this.lastSampleAt = 0;
+    this.volEstimateAt = 0;
+    this.annualVol = VOL_PRESETS[this.volPreset];
     if (mode === 'live') {
       this.connectLive();
       this.feedStatus = 'connecting';
@@ -600,6 +753,7 @@ export class MarketStore {
       this.engine.reseed(Math.floor(Math.random() * 0xffffffff), this.price);
       this.seedSyntheticHistory();
     }
+    this.lastStepAt = Date.now();
     // The strike belongs to the old series; re-anchor to the new feed.
     this.round = { ...this.round, strike: this.price };
     this.queueSave();
@@ -608,6 +762,7 @@ export class MarketStore {
 
   setRoundMs(roundMs: number) {
     if (roundMs === this.roundMs) return;
+    this.refundOpenTickets('the round length changed');
     this.roundMs = roundMs;
     const now = Date.now();
     const bounds = roundBounds(now, roundMs);
@@ -700,11 +855,9 @@ export class MarketStore {
     if (this.feed) return;
     this.feed = new LiveFeed({
       onTick: (tick) => {
+        const first = this.livePrice <= 0;
         this.livePrice = tick.p;
-        if (this.mode === 'live' && this.series.length === 0) {
-          this.setPrice(tick.p);
-          this.round = { ...this.round, strike: tick.p };
-        }
+        if (first && this.mode === 'live') this.adoptLivePrice(tick.p);
       },
       onStatus: (status, detail) => {
         this.feedStatus = status;
@@ -713,16 +866,34 @@ export class MarketStore {
       },
       onHistory: (ticks) => {
         if (this.mode !== 'live') return;
-        // Only use the seed if we have not already built a live series.
-        const existing = this.series;
-        const merged = [...ticks, ...existing].sort((a, b) => a.t - b.t);
-        this.series = merged;
-        const bounds = roundBounds(Date.now(), this.roundMs);
-        this.round = { ...this.round, strike: this.priceAt(bounds.startsAt) };
+        this.series = [...ticks, ...this.series].sort((a, b) => a.t - b.t);
+        if (this.livePrice <= 0) {
+          // Candles are real prices, so they are a legitimate first quote.
+          this.livePrice = ticks[ticks.length - 1].p;
+          this.adoptLivePrice(this.livePrice);
+        } else {
+          this.reanchorStrike();
+        }
         this.emitSlow();
       },
     });
     this.feed.start();
+  }
+
+  /** Take the first real price as the current one, with no flash or jump. */
+  private adoptLivePrice(p: number) {
+    this.price = this.prevPrice = p;
+    this.tickDir = 0;
+    this.recentDir = 0;
+    this.reanchorStrike();
+    this.emitSlow();
+  }
+
+  /** Re-read the strike from whatever the series says the round opened at. */
+  private reanchorStrike() {
+    const bounds = roundBounds(Date.now(), this.roundMs);
+    const at = this.priceAt(bounds.startsAt);
+    this.round = { ...this.round, strike: at > 0 ? at : this.price };
   }
 
   private disconnectLive() {
