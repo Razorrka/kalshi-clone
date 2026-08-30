@@ -24,6 +24,7 @@ Then open the URL it prints. It is built for a phone-sized viewport; on a
 desktop it renders inside a phone frame.
 
 ```bash
+npm test           # run the test suite
 npm run build      # production build into dist/
 npm run preview    # serve the production build
 npm run typecheck  # tsc, no emit
@@ -116,6 +117,31 @@ for anything showing the price, and a "slow" one for structural changes such
 as a round rolling over. The chart is a canvas driven by its own animation
 frame, reading the store directly — at five samples a second, re-rendering the
 React tree for every tick would be pure waste.
+
+## Tests
+
+`npm test` (vitest). The suite covers the parts where being wrong would be
+invisible in the UI:
+
+- **Engine calibration** — the volatility the price engine actually produces,
+  measured back out of its own output, matches the volatility it was
+  configured with to within 3%. That equality is what makes the quoted odds
+  mean anything, since the same number is fed to the option pricer. Also that
+  jumps genuinely fatten the tails, and that stochastic volatility stays
+  inside the band the pricer was calibrated for.
+- **Odds** — `probUp` against textbook normal values, monotonicity in price
+  and in time remaining, convergence to certainty at expiry, and that the
+  payout ladder takes its edge out of winnings only, so a side displayed at
+  1% pays what 1% is worth.
+- **Rounds** — wall-clock alignment for every supported length, contiguous
+  non-overlapping windows, and ties settling Down.
+- **Settlement** — that a winning ticket is credited exactly its locked
+  multiplier and nothing else, that the balance stays in whole cents, that
+  combos compound and die on the first miss, and that refunds happen only
+  where a ticket genuinely could not resolve: a combo leg on a round that
+  never ran is refunded, but a leg that lost on a round that did run is not.
+- **Slept tabs** — the simulation catches up across a multi-minute timer gap
+  and fills the tape rather than leaving a hole.
 
 ## Notes and limits
 
