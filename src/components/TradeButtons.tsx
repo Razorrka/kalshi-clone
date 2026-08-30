@@ -1,15 +1,27 @@
 import { useMarket } from '../store/useMarket';
 import { fmtMoney, fmtMultiplier } from '../lib/format';
 import { LOCK_MS } from '../engine/odds';
+import type { Side } from '../engine/types';
 import { Book, ComboMark } from './icons';
 
 export function TradeArea() {
   const store = useMarket(true);
-  const down = store.feedDown || store.awaitingFeed;
-  const locked = !store.canTrade;
-  const upStake = store.stakeOn('up');
-  const downStake = store.stakeOn('down');
-  const comboCount = store.openCombos.length;
+  const { feedDown, awaitingFeed, canTrade } = store;
+  // No usable quote means the percentages and multipliers are not real yet.
+  const noQuote = feedDown || awaitingFeed;
+
+  const label = (side: Side) => {
+    if (feedDown) return 'Offline';
+    if (awaitingFeed) return 'Connecting';
+    if (!canTrade) return 'Locked';
+    const pct = side === 'up' ? store.quote.upPct : store.quote.downPct;
+    return `${side === 'up' ? 'Up' : 'Down'} · ${pct}%`;
+  };
+
+  const multiplier = (side: Side) =>
+    noQuote
+      ? '—'
+      : fmtMultiplier(side === 'up' ? store.quote.upMultiplier : store.quote.downMultiplier);
 
   return (
     <div className="trade-area">
@@ -21,80 +33,71 @@ export function TradeArea() {
       <div className="divider" />
 
       <div className="bet-row">
-        <div className="bet">
-          <button
-            className="bet-btn up"
-            disabled={locked}
-            onClick={() => store.openSheet('ticket', 'up')}
-          >
-            {down
-              ? store.feedDown
-                ? 'Offline'
-                : 'Connecting'
-              : locked
-                ? 'Locked'
-                : `Up · ${store.quote.upPct}%`}
-          </button>
-          <div className="bet-sub tnum">{fmtMultiplier(store.quote.upMultiplier)}</div>
-          {upStake > 0 && (
-            <div className="bet-stake up tnum">
-              {fmtMoney(upStake)} → {fmtMoney(store.returnIf('up'))}
+        {(['up', 'down'] as const).map((side) => {
+          const stake = store.stakeOn(side);
+          return (
+            <div className="bet" key={side}>
+              <button
+                className={`bet-btn ${side}`}
+                disabled={!canTrade}
+                onClick={() => store.openSheet('ticket', side)}
+              >
+                {label(side)}
+              </button>
+              <div className="bet-sub tnum">{multiplier(side)}</div>
+              {stake > 0 && (
+                <div className={`bet-stake ${side} tnum`}>
+                  {fmtMoney(stake)} → {fmtMoney(store.returnIf(side))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-
-        <div className="bet">
-          <button
-            className="bet-btn down"
-            disabled={locked}
-            onClick={() => store.openSheet('ticket', 'down')}
-          >
-            {down
-              ? store.feedDown
-                ? 'Offline'
-                : 'Connecting'
-              : locked
-                ? 'Locked'
-                : `Down · ${store.quote.downPct}%`}
-          </button>
-          <div className="bet-sub tnum">{fmtMultiplier(store.quote.downMultiplier)}</div>
-          {downStake > 0 && (
-            <div className="bet-stake down tnum">
-              {fmtMoney(downStake)} → {fmtMoney(store.returnIf('down'))}
-            </div>
-          )}
-        </div>
+          );
+        })}
       </div>
 
-      {store.feedDown ? (
-        <div
-          className="note"
-          style={{ textAlign: 'center', marginTop: 10, color: 'var(--down)' }}
-        >
-          No live BTC price to settle against.{' '}
-          <button
-            style={{ color: 'inherit', textDecoration: 'underline', fontWeight: 800 }}
-            onClick={() => store.setMode('sim')}
-          >
-            Switch to JIT Coin
-          </button>
-        </div>
-      ) : (
-        locked && (
-          <div
-            className="note"
-            style={{ textAlign: 'center', marginTop: 10, color: 'var(--muted)' }}
-          >
-            Picks close {LOCK_MS / 1000}s before settlement
-          </div>
-        )
-      )}
+      <TradeNote />
 
       <button className="combo-bar" onClick={() => store.openSheet('combo')}>
         <ComboMark />
         COMBO
-        {comboCount > 0 && <span className="count tnum">{comboCount} open</span>}
+        {store.openCombos.length > 0 && (
+          <span className="count tnum">{store.openCombos.length} open</span>
+        )}
       </button>
     </div>
   );
+}
+
+function TradeNote() {
+  const store = useMarket(true);
+  const style = { textAlign: 'center' as const, marginTop: 10 };
+
+  if (store.feedDown) {
+    return (
+      <div className="note" style={{ ...style, color: 'var(--down)' }}>
+        No live BTC price to settle against.{' '}
+        <button
+          style={{ color: 'inherit', textDecoration: 'underline', fontWeight: 800 }}
+          onClick={() => store.setMode('sim')}
+        >
+          Switch to JIT Coin
+        </button>
+      </div>
+    );
+  }
+  if (store.awaitingFeed) {
+    return (
+      <div className="note" style={style}>
+        Waiting for the first price from Coinbase
+      </div>
+    );
+  }
+  if (store.isLocked) {
+    return (
+      <div className="note" style={style}>
+        Picks close {LOCK_MS / 1000}s before settlement
+      </div>
+    );
+  }
+  return null;
 }
