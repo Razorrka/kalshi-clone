@@ -1,30 +1,27 @@
 import type { Candle } from './types';
 
 /**
- * Buy / sell markers for the candle chart.
+ * UT Bot Alerts, with a DEMA overlay — the pair used on the TradingView
+ * layout this mirrors.
  *
- * These rules are a stated default, not a copy of any particular system:
- * a fast/slow EMA crossover for direction, filtered by RSI so the marker does
- * not fire into an already-exhausted move. Swap `SIGNAL_RULES` to change what
- * fires; everything downstream reads from it.
+ * UT Bot is an ATR trailing stop: the stop ratchets in the direction of the
+ * trend and never loosens, and a signal fires on the bar where price crosses
+ * it. `keyValue` scales how far the stop sits from price (bigger = less
+ * sensitive), `atrPeriod` is the ATR length.
  */
 
 export interface SignalConfig {
-  fastPeriod: number;
-  slowPeriod: number;
-  rsiPeriod: number;
-  /** Do not call a buy when RSI is already above this. */
-  overbought: number;
-  /** Do not call a sell when RSI is already below this. */
-  oversold: number;
+  /** "Key Value" — the ATR multiple the stop trails by. */
+  keyValue: number;
+  atrPeriod: number;
+  /** Period for the DEMA drawn over the candles. */
+  demaPeriod: number;
 }
 
 export const SIGNAL_RULES: SignalConfig = {
-  fastPeriod: 5,
-  slowPeriod: 13,
-  rsiPeriod: 9,
-  overbought: 72,
-  oversold: 28,
+  keyValue: 1,
+  atrPeriod: 10,
+  demaPeriod: 9,
 };
 
 export interface Signal {
@@ -32,13 +29,19 @@ export interface Signal {
   t: number;
   side: 'buy' | 'sell';
   price: number;
-  rsi: number;
+}
+
+export interface SignalResult {
+  signals: Signal[];
+  /** The ATR trailing stop, aligned to the input candles. */
+  trail: (number | null)[];
+  /** The DEMA overlay, aligned to the input candles. */
+  dema: (number | null)[];
 }
 
 /**
  * Exponential moving average, seeded with the simple average of the first
- * `period` values so early output is not dragged by a single price.
- * Returns one value per input, with nulls until the window fills.
+ * `period` values. One value per input, null until the window fills.
  */
 export function ema(values: number[], period: number): (number | null)[] {
   const out: (number | null)[] = new Array(values.length).fill(null);
@@ -58,83 +61,129 @@ export function ema(values: number[], period: number): (number | null)[] {
 }
 
 /**
- * Wilder's RSI: the original smoothing, where each new average carries
- * (period - 1) parts of the old one. Returns one value per input, with nulls
- * until enough changes have accumulated.
+ * Double EMA: 2 * EMA(n) - EMA(EMA(n), n). It tracks price more closely than
+ * a plain EMA by subtracting most of the lag the second pass measures.
  */
-export function rsi(values: number[], period: number): (number | null)[] {
+export function dema(values: number[], period: number): (number | null)[] {
   const out: (number | null)[] = new Array(values.length).fill(null);
-  if (period <= 0 || values.length <= period) return out;
+  const first = ema(values, period);
 
-  let gain = 0;
-  let loss = 0;
-  for (let i = 1; i <= period; i++) {
-    const change = values[i] - values[i - 1];
-    if (change >= 0) gain += change;
-    else loss -= change;
-  }
-  let avgGain = gain / period;
-  let avgLoss = loss / period;
-  out[period] = toRsi(avgGain, avgLoss);
+  // The second pass runs over the first's output, which starts partway in.
+  const start = first.findIndex((v) => v !== null);
+  if (start < 0) return out;
+  const inner = first.slice(start) as number[];
+  const second = ema(inner, period);
 
-  for (let i = period + 1; i < values.length; i++) {
-    const change = values[i] - values[i - 1];
-    const up = change > 0 ? change : 0;
-    const down = change < 0 ? -change : 0;
-    avgGain = (avgGain * (period - 1) + up) / period;
-    avgLoss = (avgLoss * (period - 1) + down) / period;
-    out[i] = toRsi(avgGain, avgLoss);
+  for (let i = 0; i < second.length; i++) {
+    const a = inner[i];
+    const b = second[i];
+    if (b === null) continue;
+    out[start + i] = 2 * a - b;
   }
   return out;
 }
 
-function toRsi(avgGain: number, avgLoss: number): number {
-  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
-  const rs = avgGain / avgLoss;
-  return 100 - 100 / (1 + rs);
+/** True range: the widest of today's span and the gaps from yesterday's close. */
+export function trueRange(candles: Candle[]): number[] {
+  return candles.map((c, i) => {
+    if (i === 0) return c.high - c.low;
+    const prevClose = candles[i - 1].close;
+    return Math.max(
+      c.high - c.low,
+      Math.abs(c.high - prevClose),
+      Math.abs(c.low - prevClose),
+    );
+  });
+}
+
+/**
+ * Average true range using Wilder's smoothing, which is what TradingView's
+ * `atr()` uses: seed with the mean of the first `period` ranges, then each
+ * new average keeps (period - 1) parts of the old one.
+ */
+export function atr(candles: Candle[], period: number): (number | null)[] {
+  const out: (number | null)[] = new Array(candles.length).fill(null);
+  if (period <= 0 || candles.length < period) return out;
+
+  const tr = trueRange(candles);
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += tr[i];
+  let prev = sum / period;
+  out[period - 1] = prev;
+
+  for (let i = period; i < candles.length; i++) {
+    prev = (prev * (period - 1) + tr[i]) / period;
+    out[i] = prev;
+  }
+  return out;
 }
 
 /** How many closed bars are needed before anything can fire. */
 export function minimumBars(config: SignalConfig = SIGNAL_RULES): number {
-  return Math.max(config.slowPeriod, config.rsiPeriod + 1) + 1;
+  return Math.max(config.atrPeriod, config.demaPeriod * 2) + 2;
 }
 
 /**
- * Signals for a series of candles.
+ * The UT Bot trailing stop and its crossings.
  *
- * Only closed bars are considered. A still-forming bar's close moves with
- * every tick, so a marker drawn on it would appear and vanish as the price
- * wobbles — the repainting that makes a chart untrustworthy.
+ * The stop only ever tightens while price stays on one side of it: above the
+ * stop it ratchets up to `price - keyValue * ATR` and never back down; below,
+ * it ratchets down. When price closes through it, the stop flips to the other
+ * side and that bar is the signal.
  */
 export function computeSignals(
   candles: Candle[],
   config: SignalConfig = SIGNAL_RULES,
-): Signal[] {
+): SignalResult {
+  // A forming bar's close moves with every tick, so a marker on it would
+  // appear and vanish as price wobbles. Only closed bars are considered.
   const closed = candles.filter((c) => !c.live);
-  if (closed.length < minimumBars(config)) return [];
+  const empty: SignalResult = { signals: [], trail: [], dema: [] };
+  if (closed.length < minimumBars(config)) return empty;
 
-  const closes = closed.map((c) => c.close);
-  const fast = ema(closes, config.fastPeriod);
-  const slow = ema(closes, config.slowPeriod);
-  const strength = rsi(closes, config.rsiPeriod);
+  const src = closed.map((c) => c.close);
+  const ranges = atr(closed, config.atrPeriod);
+  const demaLine = dema(src, config.demaPeriod);
 
-  const out: Signal[] = [];
-  for (let i = 1; i < closed.length; i++) {
-    const f = fast[i];
-    const s = slow[i];
-    const pf = fast[i - 1];
-    const ps = slow[i - 1];
-    const r = strength[i];
-    if (f === null || s === null || pf === null || ps === null || r === null) continue;
+  const trail: (number | null)[] = new Array(closed.length).fill(null);
+  const signals: Signal[] = [];
 
-    const crossedUp = pf <= ps && f > s;
-    const crossedDown = pf >= ps && f < s;
+  let prevStop = 0;
+  let started = false;
 
-    if (crossedUp && r < config.overbought) {
-      out.push({ t: closed[i].t, side: 'buy', price: closed[i].close, rsi: r });
-    } else if (crossedDown && r > config.oversold) {
-      out.push({ t: closed[i].t, side: 'sell', price: closed[i].close, rsi: r });
+  for (let i = 0; i < closed.length; i++) {
+    const nLoss = ranges[i] === null ? null : config.keyValue * (ranges[i] as number);
+    if (nLoss === null) continue;
+
+    const price = src[i];
+    const prevPrice = i > 0 ? src[i - 1] : price;
+
+    let stop: number;
+    if (price > prevStop && prevPrice > prevStop) {
+      // Both bars above: ratchet the stop up, never down.
+      stop = Math.max(prevStop, price - nLoss);
+    } else if (price < prevStop && prevPrice < prevStop) {
+      // Both bars below: ratchet it down, never up.
+      stop = Math.min(prevStop, price + nLoss);
+    } else {
+      // Price has crossed; the stop flips to the other side.
+      stop = price > prevStop ? price - nLoss : price + nLoss;
     }
+    trail[i] = stop;
+
+    if (started) {
+      const crossedUp = prevPrice <= prevStop && price > stop;
+      const crossedDown = prevPrice >= prevStop && price < stop;
+      if (price > stop && crossedUp) {
+        signals.push({ t: closed[i].t, side: 'buy', price });
+      } else if (price < stop && crossedDown) {
+        signals.push({ t: closed[i].t, side: 'sell', price });
+      }
+    }
+
+    prevStop = stop;
+    started = true;
   }
-  return out;
+
+  return { signals, trail, dema: demaLine };
 }

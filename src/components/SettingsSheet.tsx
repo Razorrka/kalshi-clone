@@ -103,15 +103,14 @@ export function SettingsSheet() {
       <div className="setting">
         <div className="setting-head">
           <div className="grow">
-            <div className="k">Buy / sell markers</div>
+            <div className="k">Buy / sell labels</div>
             <div className="d">
-              Triangles on the candle chart. A buy is marked when the{' '}
-              {SIGNAL_RULES.fastPeriod}-bar average crosses up through the{' '}
-              {SIGNAL_RULES.slowPeriod}-bar one and RSI({SIGNAL_RULES.rsiPeriod}) is
-              still under {SIGNAL_RULES.overbought}; a sell on the cross back down
-              with RSI over {SIGNAL_RULES.oversold}. Only closed bars are marked —
-              a marker on the bar still forming would appear and vanish as the
-              price moves.
+              UT Bot Alerts ({SIGNAL_RULES.keyValue}, {SIGNAL_RULES.atrPeriod}) with a
+              DEMA {SIGNAL_RULES.demaPeriod} overlay, on the candle chart. The stop
+              trails price by {SIGNAL_RULES.keyValue}× ATR(
+              {SIGNAL_RULES.atrPeriod}) and only ever tightens; a label fires on the
+              bar where price closes through it. Only closed bars are marked — a
+              label on the bar still forming would appear and vanish as price moves.
             </div>
           </div>
           <button

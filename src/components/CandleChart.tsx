@@ -65,9 +65,10 @@ export function CandleChart() {
       // average over the ~17 bars that fit would leave only a few evaluable
       // points. Signals are computed over a long window and then drawn only
       // where that window overlaps what is on screen.
-      const signals = market.signalsOn
-        ? computeSignals(toCandles(market.series, market.candleMs, SIGNAL_LOOKBACK))
-        : [];
+      const signalBars = toCandles(market.series, market.candleMs, SIGNAL_LOOKBACK);
+      const study = market.signalsOn
+        ? computeSignals(signalBars)
+        : { signals: [], trail: [], dema: [] };
 
       let lo = Infinity;
       let hi = -Infinity;
@@ -186,33 +187,73 @@ export function CandleChart() {
         ctx.globalAlpha = 1;
       }
 
-      // ---- buy / sell markers ----------------------------------------------
+      // ---- DEMA overlay ------------------------------------------------------
+      if (market.signalsOn && study.dema.length) {
+        ctx.beginPath();
+        let drawing = false;
+        for (let i = 0; i < signalBars.length; i++) {
+          const v = study.dema[i];
+          if (v === null || v === undefined) {
+            drawing = false;
+            continue;
+          }
+          const x = xOf(signalBars[i].t);
+          const y = yOf(v);
+          if (drawing) ctx.lineTo(x, y);
+          else {
+            ctx.moveTo(x, y);
+            drawing = true;
+          }
+        }
+        ctx.strokeStyle = 'rgba(0,221,148,0.85)';
+        ctx.lineWidth = 1.4;
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+      }
+
+      // ---- buy / sell labels -------------------------------------------------
       const visible = new Map(bars.map((b) => [b.t, b]));
-      for (const sig of signals) {
+      for (const sig of study.signals) {
         const bar = visible.get(sig.t);
         if (!bar) continue;
         const x = xOf(sig.t);
         if (x < -SLOT || x > plotRight + SLOT) continue;
 
         const buy = sig.side === 'buy';
-        const colour = buy ? '#00dd94' : '#ff454d';
-        // Sit clear of the bar: below its low for a buy, above its high for a
-        // sell, so the marker never covers the price action it refers to.
-        const anchor = buy ? yOf(bar.low) + 13 : yOf(bar.high) - 13;
-        const tip = buy ? anchor - 7 : anchor + 7;
+        const colour = buy ? '#00c07b' : '#f0434c';
+        const text = buy ? 'Buy' : 'Sell';
+
+        ctx.font = '800 10px ' + font;
+        const tw = ctx.measureText(text).width;
+        const boxW = tw + 11;
+        const boxH = 16;
+        // Clear of the bar it refers to: under the low for a buy, over the
+        // high for a sell, so the label never covers the price action.
+        const boxY = buy ? yOf(bar.low) + 7 : yOf(bar.high) - 7 - boxH;
+        const boxX = Math.max(2, Math.min(plotRight - boxW - 2, x - boxW / 2));
 
         ctx.fillStyle = colour;
         ctx.beginPath();
-        ctx.moveTo(x, tip);
-        ctx.lineTo(x - 5.5, anchor);
-        ctx.lineTo(x + 5.5, anchor);
+        ctx.roundRect(boxX, boxY, boxW, boxH, 3);
+        ctx.fill();
+        // The little pointer back to the bar.
+        ctx.beginPath();
+        if (buy) {
+          ctx.moveTo(x, boxY - 4);
+          ctx.lineTo(x - 4, boxY + 1);
+          ctx.lineTo(x + 4, boxY + 1);
+        } else {
+          ctx.moveTo(x, boxY + boxH + 4);
+          ctx.lineTo(x - 4, boxY + boxH - 1);
+          ctx.lineTo(x + 4, boxY + boxH - 1);
+        }
         ctx.closePath();
         ctx.fill();
 
-        ctx.font = '800 9px ' + font;
+        ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(buy ? 'B' : 'S', x, buy ? anchor + 8 : anchor - 8);
+        ctx.fillText(text, boxX + boxW / 2, boxY + boxH / 2 + 0.5);
       }
 
       // ---- live price tag --------------------------------------------------
