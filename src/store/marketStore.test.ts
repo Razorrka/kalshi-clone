@@ -349,3 +349,193 @@ describe('quoting', () => {
     }
   });
 });
+
+describe('limit orders', () => {
+  beforeEach(() => {
+    store = newStore();
+  });
+
+  it('reserves the stake while the order rests', () => {
+    const before = store.balanceCents;
+    // Ask for a price far better than the market so it cannot fill yet.
+    const far = Math.max(1, store.centsFor('up') - 25);
+    expect(store.placeLimitOrder('up', far, 20).ok).toBe(true);
+
+    expect(store.balanceCents).toBe(before - 2_000);
+    expect(store.restingOrders).toHaveLength(1);
+    expect(store.openPositions).toHaveLength(0);
+  });
+
+  it('hands the stake back when cancelled', () => {
+    const before = store.balanceCents;
+    const far = Math.max(1, store.centsFor('up') - 25);
+    store.placeLimitOrder('up', far, 20);
+    const id = store.restingOrders[0].id;
+
+    expect(store.cancelLimitOrder(id)).toBe(true);
+    expect(store.balanceCents).toBe(before);
+    expect(store.restingOrders).toHaveLength(0);
+  });
+
+  it('rejects a price outside the 1c-99c contract range', () => {
+    expect(store.placeLimitOrder('up', 0, 10).ok).toBe(false);
+    expect(store.placeLimitOrder('up', 100, 10).ok).toBe(false);
+    expect(store.balanceCents).toBe(100_000);
+  });
+
+  it('rejects more than the balance', () => {
+    const result = store.placeLimitOrder('up', 50, store.balance + 1);
+    expect(result).toEqual({ ok: false, error: 'Not enough balance' });
+  });
+
+  it('fills immediately when the market is already at the price', () => {
+    const before = store.balanceCents;
+    // A limit of 99c accepts any price, so it fills on the next tick.
+    store.placeLimitOrder('up', 99, 20);
+    expect(store.openPositions).toHaveLength(0);
+
+    run(200);
+
+    expect(store.restingOrders).toHaveLength(0);
+    expect(store.openPositions).toHaveLength(1);
+    const pos = store.openPositions[0];
+    expect(pos.side).toBe('up');
+    expect(pos.stake).toBe(20);
+    // Filled at the market, which is at or better than the limit.
+    expect(pos.entryProb * 100).toBeLessThanOrEqual(99);
+    // The stake was taken once, at order time, not again at fill.
+    expect(store.balanceCents).toBe(before - 2_000);
+  });
+
+  it('never fills a buy above its price', () => {
+    store.placeLimitOrder('up', 1, 20);
+    run(20_000);
+    for (const o of store.limitOrders) {
+      if (o.status === 'filled') expect(o.filledCents).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('pays a bigger multiplier for a cheaper fill', () => {
+    store.placeLimitOrder('up', 99, 10);
+    run(200);
+    const pos = store.openPositions[0];
+    const cents = store.limitOrders.find((o) => o.status === 'filled')!.filledCents!;
+    // Cheaper contracts pay more; check the position agrees with its fill.
+    expect(pos.multiplier).toBeCloseTo(1 + ((100 - cents) / cents) * 0.9, 6);
+  });
+
+  it('expires unfilled orders at the bell and returns the stake', () => {
+    const before = store.balanceCents;
+    store.placeLimitOrder('up', 1, 25);
+    store.placeLimitOrder('down', 1, 25);
+    expect(store.balanceCents).toBe(before - 5_000);
+
+    run(MINUTE);
+
+    const stillResting = store.limitOrders.filter((o) => o.status === 'resting');
+    expect(stillResting).toHaveLength(0);
+    // Whatever did not fill came back; anything that filled settled normally.
+    expect(store.balanceCents).toBeGreaterThanOrEqual(before - 5_000);
+  });
+
+  it('will not rest an order once the market is locked', () => {
+    store.stop();
+    store = newStore(T0 + MINUTE - 2_000);
+    expect(store.placeLimitOrder('up', 50, 10)).toEqual({
+      ok: false,
+      error: 'Market locked for settlement',
+    });
+  });
+});
+
+describe('closing a position early', () => {
+  beforeEach(() => {
+    store = newStore();
+  });
+
+  it('values an open ticket at payout times its live chance', () => {
+    store.placeBet('up', 40);
+    const pos = store.openPositions[0];
+    const mark = store.markOf(pos);
+    expect(mark.value).toBeCloseTo(
+      pos.stake * pos.multiplier * store.quote.pUp,
+      6,
+    );
+    expect(mark.pnl).toBeCloseTo(mark.value - pos.stake, 10);
+  });
+
+  it('is worth a little under the stake the instant it opens', () => {
+    store.placeBet('up', 100);
+    const mark = store.markOf(store.openPositions[0]);
+    // The entry spread, nothing more.
+    expect(mark.value).toBeLessThan(100);
+    expect(mark.value).toBeGreaterThan(88);
+  });
+
+  it('credits the mark and locks the P&L in', () => {
+    const before = store.balanceCents;
+    store.placeBet('down', 30);
+    const pos = store.openPositions[0];
+    const expected = store.markOf(pos).value;
+
+    expect(store.closePosition(pos.id).ok).toBe(true);
+
+    const closed = store.positions.find((p) => p.id === pos.id)!;
+    expect(closed.status).toBe('closed');
+    expect(closed.closeValue).toBeCloseTo(expected, 2);
+    expect(closed.pnl).toBeCloseTo(expected - 30, 2);
+    expect(store.balanceCents).toBe(
+      before - 3_000 + Math.round(expected * 100),
+    );
+    expect(store.openPositions).toHaveLength(0);
+  });
+
+  it('leaves a closed ticket out of settlement, so it pays only once', () => {
+    const before = store.balanceCents;
+    store.placeBet('up', 25);
+    const pos = store.openPositions[0];
+    store.closePosition(pos.id);
+    const afterClose = store.balanceCents;
+
+    run(MINUTE);
+
+    expect(store.balanceCents).toBe(afterClose);
+    const settled = store.positions.find((p) => p.id === pos.id)!;
+    expect(settled.status).toBe('closed');
+    // The round's record still remembers what the ticket did.
+    expect(store.history[0].staked).toBe(25);
+    expect(store.history[0].pnl).toBeCloseTo(afterClose / 100 - before / 100, 6);
+  });
+
+  it('cannot be closed twice', () => {
+    store.placeBet('up', 10);
+    const id = store.openPositions[0].id;
+    expect(store.closePosition(id).ok).toBe(true);
+    expect(store.closePosition(id)).toEqual({
+      ok: false,
+      error: 'Position is no longer open',
+    });
+  });
+
+  it('suspends closing inside the settlement lock', () => {
+    store.placeBet('up', 10);
+    const id = store.openPositions[0].id;
+    run(MINUTE - 3_000);
+    expect(store.isLocked).toBe(true);
+    expect(store.closePosition(id)).toEqual({
+      ok: false,
+      error: 'Closing is suspended near settlement',
+    });
+  });
+
+  it('totals unrealised P&L across open tickets', () => {
+    store.placeBet('up', 20);
+    store.placeBet('down', 20);
+    const sum = store.openPositions.reduce((a, p) => a + store.markOf(p).pnl, 0);
+    expect(store.openPnl).toBeCloseTo(sum, 10);
+    expect(store.openValue).toBeCloseTo(
+      store.openPositions.reduce((a, p) => a + store.markOf(p).value, 0),
+      10,
+    );
+  });
+});

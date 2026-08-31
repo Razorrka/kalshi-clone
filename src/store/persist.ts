@@ -1,4 +1,10 @@
-import type { ComboTicket, FeedMode, Position, RoundResult } from '../engine/types';
+import type {
+  ComboTicket,
+  FeedMode,
+  LimitOrder,
+  Position,
+  RoundResult,
+} from '../engine/types';
 import type { VolPreset } from '../engine/priceEngine';
 
 const KEY = 'jitcoin:v1';
@@ -10,6 +16,7 @@ export interface PersistedState {
   balanceCents: number;
   history: RoundResult[];
   positions: Position[];
+  limitOrders: LimitOrder[];
   combos: ComboTicket[];
   simPrice: number;
   simSeed: number;

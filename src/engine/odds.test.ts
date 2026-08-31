@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { HOUSE_EDGE, displayPercents, multiplierFor, probUp } from './odds';
+import {
+  HOUSE_EDGE,
+  displayPercents,
+  limitFills,
+  markToMarket,
+  multiplierAtCents,
+  multiplierFor,
+  probUp,
+  sideCents,
+} from './odds';
 
 const MIN = 60_000;
 
@@ -111,5 +120,63 @@ describe('displayPercents', () => {
   it('never shows a market as 0% or 100%', () => {
     expect(displayPercents(0)).toEqual({ up: 1, down: 99 });
     expect(displayPercents(1)).toEqual({ up: 99, down: 1 });
+  });
+});
+
+describe('markToMarket', () => {
+  it('values a ticket at its payout times the chance of getting it', () => {
+    // $10 at 2x pays $20 if it lands; at a 60% chance that is worth $12.
+    expect(markToMarket(10, 2, 0.6)).toBeCloseTo(12, 10);
+    expect(markToMarket(10, 2, 1)).toBeCloseTo(20, 10);
+    expect(markToMarket(10, 2, 0)).toBe(0);
+  });
+
+  it('is worth slightly less than the stake the moment it is opened', () => {
+    // The entry spread is the house edge on the losing side of the payout.
+    for (const p of [0.2, 0.5, 0.8]) {
+      const m = multiplierFor(p);
+      const value = markToMarket(100, m, p);
+      expect(value).toBeLessThan(100);
+      expect(value).toBeCloseTo(100 * (1 - HOUSE_EDGE * (1 - p)), 6);
+    }
+  });
+
+  it('leaves no arbitrage in closing both sides at once', () => {
+    // Buying both sides and cashing out immediately must never profit.
+    for (const p of [0.1, 0.35, 0.5, 0.77, 0.95]) {
+      const up = markToMarket(50, multiplierFor(p), p);
+      const down = markToMarket(50, multiplierFor(1 - p), 1 - p);
+      expect(up + down).toBeLessThanOrEqual(100 + 1e-9);
+    }
+  });
+
+  it('tracks the probability, so P&L moves with the price', () => {
+    const m = multiplierFor(0.5);
+    const worse = markToMarket(20, m, 0.3);
+    const same = markToMarket(20, m, 0.5);
+    const better = markToMarket(20, m, 0.7);
+    expect(worse).toBeLessThan(same);
+    expect(same).toBeLessThan(better);
+  });
+});
+
+describe('limit orders', () => {
+  it('fills a buy only at its price or cheaper', () => {
+    expect(limitFills(45, 45)).toBe(true);
+    expect(limitFills(40, 45)).toBe(true);
+    expect(limitFills(46, 45)).toBe(false);
+  });
+
+  it('quotes each side out of 100 cents', () => {
+    expect(sideCents('up', 0.62)).toBe(62);
+    expect(sideCents('down', 0.62)).toBe(38);
+    expect(sideCents('up', 0)).toBe(1);
+    expect(sideCents('up', 1)).toBe(99);
+  });
+
+  it('pays a bigger multiplier for a cheaper fill', () => {
+    expect(multiplierAtCents(20)).toBeGreaterThan(multiplierAtCents(50));
+    expect(multiplierAtCents(50)).toBeGreaterThan(multiplierAtCents(80));
+    expect(multiplierAtCents(50)).toBeCloseTo(multiplierFor(0.5), 10);
   });
 });

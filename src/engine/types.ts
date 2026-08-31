@@ -23,7 +23,7 @@ export interface Round {
   closePrice?: number;
 }
 
-export type PositionStatus = 'open' | 'won' | 'lost';
+export type PositionStatus = 'open' | 'won' | 'lost' | 'closed';
 
 export interface Position {
   id: string;
@@ -38,8 +38,49 @@ export interface Position {
   entryProb: number;
   placedAt: number;
   status: PositionStatus;
-  /** dollars, set on settle */
+  /** dollars, set on settle or on an early close */
   pnl?: number;
+  /** set when cashed out before the round ended */
+  closedAt?: number;
+  /** what the cash-out actually paid, in dollars */
+  closeValue?: number;
+  /** the resting order this position was filled from, if any */
+  fromOrderId?: string;
+}
+
+export type OrderStatus = 'resting' | 'filled' | 'cancelled' | 'expired';
+
+/**
+ * A resting buy order. Contracts are quoted in cents and settle at $1.00, so
+ * buying Up at 45c means "fill me only if Up is going for 45c or less" — a
+ * lower price is a better price for a buyer, and a bigger multiplier.
+ */
+export interface LimitOrder {
+  id: string;
+  roundId: string;
+  roundEndsAt: number;
+  side: Side;
+  /** the worst price, in cents, the order will accept */
+  limitCents: number;
+  /** dollars, reserved from the balance while the order rests */
+  stake: number;
+  placedAt: number;
+  status: OrderStatus;
+  /** cents actually paid, set on fill */
+  filledCents?: number;
+  filledAt?: number;
+}
+
+/** One OHLC bar, aggregated from the same tape the line chart draws. */
+export interface Candle {
+  /** epoch ms of the bucket's start */
+  t: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  /** true while this bar is still forming */
+  live: boolean;
 }
 
 export interface ComboLeg {
@@ -71,6 +112,17 @@ export interface RoundResult {
   pnl: number;
   staked: number;
 }
+
+export type ChartView = 'line' | 'candles' | 'positions';
+
+/** Candle widths offered in the candlestick view. */
+export const CANDLE_INTERVALS = [
+  { ms: 60_000, label: '1M' },
+  { ms: 5 * 60_000, label: '5M' },
+  { ms: 15 * 60_000, label: '15M' },
+] as const;
+
+export const DEFAULT_CANDLE_MS = 5 * 60_000;
 
 export type Timeframe = 'live' | '5m' | '15m' | '1h';
 

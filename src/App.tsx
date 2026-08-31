@@ -6,6 +6,9 @@ import { TopBar } from './components/TopBar';
 import { MarketHeader } from './components/MarketHeader';
 import { PriceStrip } from './components/PriceStrip';
 import { PriceChart } from './components/PriceChart';
+import { CandleChart } from './components/CandleChart';
+import { PositionsPanel } from './components/PositionsPanel';
+import { ViewTabs } from './components/ViewTabs';
 import { WinTape } from './components/WinTape';
 import { ControlsRow } from './components/ControlsRow';
 import { TradeArea } from './components/TradeButtons';
@@ -32,9 +35,16 @@ export default function App() {
           <TopBar />
           <MarketHeader />
           <PriceStrip />
+          <ViewTabs />
           <div className="chart-wrap">
-            <PriceChart />
-            <WinTape />
+            {store.chartView === 'line' && (
+              <>
+                <PriceChart />
+                <WinTape />
+              </>
+            )}
+            {store.chartView === 'candles' && <CandleChart />}
+            {store.chartView === 'positions' && <PositionsPanel />}
             <ResultToast />
           </div>
           <ControlsRow />

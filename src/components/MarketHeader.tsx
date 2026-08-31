@@ -36,12 +36,30 @@ export function MarketHeader() {
 
   return (
     <div className="market-head">
-      <div className={`coin-badge${live ? '' : ' jit'}`}>
-        {live ? <BitcoinGlyph size={23} /> : <JitGlyph size={22} />}
-      </div>
-      <h1 className="market-title">
-        {live ? 'BTC' : 'JIT'} {roundLabel(store.roundMs)}
-      </h1>
+      <button
+        className="market-switch"
+        onClick={() => store.toggleMode()}
+        aria-label={`Switch to ${live ? 'JIT Coin' : 'live Bitcoin'}`}
+        title={`Switch to ${live ? 'JIT Coin' : 'live Bitcoin'}`}
+      >
+        <span className={`coin-badge${live ? '' : ' jit'}`}>
+          {live ? <BitcoinGlyph size={23} /> : <JitGlyph size={22} />}
+        </span>
+        <span className="market-title">
+          {live ? 'BTC' : 'JIT'} {roundLabel(store.roundMs)}
+        </span>
+        <span className="switch-chev" aria-hidden="true">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M6 9.5l6 6 6-6"
+              stroke="currentColor"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+      </button>
       <span className={`countdown tnum${urgent ? ' urgent' : ''}`}>
         {fmtClock(msLeft)}
       </span>

@@ -2,14 +2,26 @@ import { PriceEngine, VOL_PRESETS, type VolPreset } from '../engine/priceEngine'
 import { LiveFeed } from '../engine/liveFeed';
 import { OrderBookSim, type OrderBookSnapshot } from '../engine/orderBook';
 import { TapeSim, type TapeEntry } from '../engine/tape';
-import { LOCK_MS, displayPercents, multiplierFor, probUp } from '../engine/odds';
+import {
+  LOCK_MS,
+  displayPercents,
+  limitFills,
+  markToMarket,
+  multiplierAtCents,
+  multiplierFor,
+  probOf,
+  probUp,
+  sideCents,
+} from '../engine/odds';
 import { SECONDS_PER_YEAR, clamp } from '../lib/math';
 import { DEFAULT_ROUND_MS, makeRound, roundBounds, settleRound } from '../engine/rounds';
 import type {
+  ChartView,
   ComboLeg,
   ComboTicket,
   FeedMode,
   FeedStatus,
+  LimitOrder,
   Position,
   Round,
   RoundResult,
@@ -17,6 +29,7 @@ import type {
   Tick,
   Timeframe,
 } from '../engine/types';
+import { DEFAULT_CANDLE_MS } from '../engine/types';
 import { clearState, loadState, saveState } from './persist';
 
 /** ~5 Hz sampling keeps an hour of tape in a few thousand points. */
@@ -81,11 +94,14 @@ export class MarketStore {
   // ---- account -----------------------------------------------------------
   balanceCents = STARTING_BALANCE_CENTS;
   positions: Position[] = [];
+  limitOrders: LimitOrder[] = [];
   combos: ComboTicket[] = [];
   history: RoundResult[] = [];
 
   // ---- ui ----------------------------------------------------------------
   timeframe: Timeframe = 'live';
+  chartView: ChartView = 'line';
+  candleMs: number = DEFAULT_CANDLE_MS;
   sheet: SheetName | null = null;
   ticketSide: Side = 'up';
   ticketStake = 25;
@@ -137,7 +153,7 @@ export class MarketStore {
 
     const now = Date.now();
     this.round = makeRound(now, this.roundMs, this.price);
-    this.refundStale(saved?.positions, saved?.combos);
+    this.refundStale(saved?.positions, saved?.combos, saved?.limitOrders);
     this.recompute(now);
   }
 
@@ -269,11 +285,12 @@ export class MarketStore {
 
     const rolled = this.maybeRollRound(now);
     this.recompute(now);
+    const filled = this.fillRestingOrders(now);
     this.pollTape(now);
 
     if (this.sheet === 'book') this.book = this.bookSim.snapshot(this.quote.pUp);
 
-    if (rolled) this.emitSlow();
+    if (rolled || filled) this.emitSlow();
     else this.emitFast();
   }
 
@@ -413,6 +430,13 @@ export class MarketStore {
       }
       return true;
     });
+    this.limitOrders = this.limitOrders.filter((o) => {
+      if (o.status === 'resting' && o.roundEndsAt <= now && o.roundId !== this.round.id) {
+        refunded += o.stake;
+        return false;
+      }
+      return true;
+    });
     if (refunded <= 0) return;
     this.balanceCents += Math.round(refunded * 100);
     this.showToast({
@@ -444,6 +468,23 @@ export class MarketStore {
     let won = 0;
     let lost = 0;
 
+    // A resting order that never got its price simply expires; the reserved
+    // stake was never spent, so it goes back.
+    let expired = 0;
+    this.limitOrders = this.limitOrders.map((o) => {
+      if (o.status !== 'resting' || o.roundId !== round.id) return o;
+      this.balanceCents += Math.round(o.stake * 100);
+      expired += o.stake;
+      return { ...o, status: 'expired' as const };
+    });
+    if (expired > 0) {
+      this.showToast({
+        kind: 'info',
+        title: 'Limit order expired',
+        detail: `$${expired.toFixed(2)} returned — the round closed before your price`,
+      });
+    }
+
     this.positions = this.positions.map((pos) => {
       if (pos.roundId !== round.id || pos.status !== 'open') return pos;
       staked += pos.stake;
@@ -459,6 +500,15 @@ export class MarketStore {
       lost += 1;
       return { ...pos, status: 'lost' as const, pnl: -pos.stake };
     });
+
+    // Tickets cashed out before the bell were already paid; their result is
+    // still part of what this round did to the balance.
+    for (const p of this.positions) {
+      if (p.status === 'closed' && p.roundId === round.id) {
+        staked += p.stake;
+        pnl += p.pnl ?? 0;
+      }
+    }
 
     const comboOutcome = this.settleCombos(round, result);
     pnl += comboOutcome.pnl;
@@ -528,7 +578,11 @@ export class MarketStore {
    * Open tickets cannot be settled honestly across a reload — the price path
    * that would have decided them never happened here. Refund instead.
    */
-  private refundStale(positions?: Position[], combos?: ComboTicket[]) {
+  private refundStale(
+    positions?: Position[],
+    combos?: ComboTicket[],
+    orders?: LimitOrder[],
+  ) {
     let refunded = 0;
     for (const p of positions ?? []) {
       if (p.status === 'open') {
@@ -540,6 +594,12 @@ export class MarketStore {
       if (c.status === 'open') {
         this.balanceCents += Math.round(c.stake * 100);
         refunded += c.stake;
+      }
+    }
+    for (const o of orders ?? []) {
+      if (o.status === 'resting') {
+        this.balanceCents += Math.round(o.stake * 100);
+        refunded += o.stake;
       }
     }
     if (refunded > 0) {
@@ -637,6 +697,185 @@ export class MarketStore {
     return { ok: true };
   }
 
+  // ---- resting limit orders ---------------------------------------------
+
+  get restingOrders(): LimitOrder[] {
+    return this.limitOrders.filter(
+      (o) => o.status === 'resting' && o.roundId === this.round.id,
+    );
+  }
+
+  /** The live price of a side, in cents, as the book quotes it. */
+  centsFor(side: Side): number {
+    return sideCents(side, this.quote.pUp);
+  }
+
+  /**
+   * Rests a buy at a price. Contracts settle at $1.00, so a lower price is a
+   * better price: an Up order at 40c fills only if Up gets that cheap, and
+   * pays more when it does.
+   */
+  placeLimitOrder(
+    side: Side,
+    limitCents: number,
+    stake: number,
+  ): { ok: boolean; error?: string } {
+    const amount = Math.round(stake * 100) / 100;
+    const cents = Math.round(limitCents);
+    if (!(amount > 0)) return { ok: false, error: 'Enter an amount' };
+    if (!(cents >= 1 && cents <= 99)) {
+      return { ok: false, error: 'Price must be between 1c and 99c' };
+    }
+    if (this.feedDown) return { ok: false, error: 'No live price — feed is offline' };
+    if (this.isLocked) return { ok: false, error: 'Market locked for settlement' };
+    if (Math.round(amount * 100) > this.balanceCents) {
+      return { ok: false, error: 'Not enough balance' };
+    }
+
+    this.balanceCents -= Math.round(amount * 100);
+    this.limitOrders = [
+      {
+        id: `o${this.idSeq++}`,
+        roundId: this.round.id,
+        roundEndsAt: this.round.endsAt,
+        side,
+        limitCents: cents,
+        stake: amount,
+        placedAt: Date.now(),
+        status: 'resting',
+      },
+      ...this.limitOrders,
+    ];
+    this.buzz(8);
+    this.queueSave();
+    this.emitSlow();
+    return { ok: true };
+  }
+
+  cancelLimitOrder(id: string): boolean {
+    const order = this.limitOrders.find((o) => o.id === id && o.status === 'resting');
+    if (!order) return false;
+    this.balanceCents += Math.round(order.stake * 100);
+    this.limitOrders = this.limitOrders.map((o) =>
+      o.id === id ? { ...o, status: 'cancelled' as const } : o,
+    );
+    this.queueSave();
+    this.emitSlow();
+    return true;
+  }
+
+  /**
+   * Fills any resting order the market has reached. A buyer gets the market
+   * price when it is better than the limit, never worse than the price asked.
+   */
+  private fillRestingOrders(now: number): boolean {
+    if (this.isLocked || this.feedDown || this.awaitingFeed) return false;
+    const resting = this.limitOrders.filter(
+      (o) => o.status === 'resting' && o.roundId === this.round.id,
+    );
+    if (resting.length === 0) return false;
+
+    let anyFilled = false;
+    for (const order of resting) {
+      const market = this.centsFor(order.side);
+      if (!limitFills(market, order.limitCents)) continue;
+
+      const multiplier = multiplierAtCents(market);
+      this.positions = [
+        {
+          id: `p${this.idSeq++}`,
+          roundId: this.round.id,
+          roundEndsAt: this.round.endsAt,
+          side: order.side,
+          stake: order.stake,
+          multiplier,
+          entryPrice: this.price,
+          entryProb: market / 100,
+          placedAt: now,
+          status: 'open',
+          fromOrderId: order.id,
+        },
+        ...this.positions,
+      ];
+      this.limitOrders = this.limitOrders.map((o) =>
+        o.id === order.id
+          ? { ...o, status: 'filled' as const, filledCents: market, filledAt: now }
+          : o,
+      );
+      anyFilled = true;
+    }
+
+    if (anyFilled) {
+      this.buzz([8, 30, 8]);
+      this.showToast({
+        kind: 'info',
+        title: 'Limit order filled',
+        detail: 'Your resting order is now an open position',
+      });
+      this.queueSave();
+    }
+    return anyFilled;
+  }
+
+  // ---- marking open positions to market ----------------------------------
+
+  /** What an open ticket is worth right now, and the P&L that implies. */
+  markOf(position: Position): { value: number; pnl: number } {
+    const value = markToMarket(
+      position.stake,
+      position.multiplier,
+      probOf(position.side, this.quote.pUp),
+    );
+    return { value, pnl: value - position.stake };
+  }
+
+  /** Unrealised P&L across every open ticket on this round. */
+  get openPnl(): number {
+    return this.openPositions.reduce((sum, p) => sum + this.markOf(p).pnl, 0);
+  }
+
+  /** Total cash-out value of every open ticket. */
+  get openValue(): number {
+    return this.openPositions.reduce((sum, p) => sum + this.markOf(p).value, 0);
+  }
+
+  /**
+   * Cashes a ticket out before the round ends, at what it is currently worth.
+   * Suspended inside the settlement lock, the same as opening a new one.
+   */
+  closePosition(id: string): { ok: boolean; error?: string } {
+    const position = this.positions.find((p) => p.id === id && p.status === 'open');
+    if (!position) return { ok: false, error: 'Position is no longer open' };
+    if (this.feedDown || this.awaitingFeed) {
+      return { ok: false, error: 'No live price to close against' };
+    }
+    if (this.isLocked) return { ok: false, error: 'Closing is suspended near settlement' };
+
+    const { value, pnl } = this.markOf(position);
+    const credit = Math.round(value * 100);
+    this.balanceCents += credit;
+    this.positions = this.positions.map((p) =>
+      p.id === id
+        ? {
+            ...p,
+            status: 'closed' as const,
+            closedAt: Date.now(),
+            closeValue: credit / 100,
+            pnl: credit / 100 - p.stake,
+          }
+        : p,
+    );
+    this.buzz(12);
+    this.showToast({
+      kind: pnl >= 0 ? 'win' : 'loss',
+      title: 'Position closed',
+      detail: `${pnl >= 0 ? '+' : '-'}$${Math.abs(credit / 100 - position.stake).toFixed(2)} locked in`,
+    });
+    this.queueSave();
+    this.emitSlow();
+    return { ok: true };
+  }
+
   placeCombo(stake: number): { ok: boolean; error?: string } {
     const amount = Math.round(stake * 100) / 100;
     const entries = [...this.comboDraft.entries()].sort((a, b) => a[0] - b[0]);
@@ -724,10 +963,12 @@ export class MarketStore {
     let refunded = 0;
     for (const p of this.positions) if (p.status === 'open') refunded += p.stake;
     for (const c of this.combos) if (c.status === 'open') refunded += c.stake;
+    for (const o of this.limitOrders) if (o.status === 'resting') refunded += o.stake;
     if (refunded <= 0) return;
     this.balanceCents += Math.round(refunded * 100);
     this.positions = this.positions.filter((p) => p.status !== 'open');
     this.combos = this.combos.filter((c) => c.status !== 'open');
+    this.limitOrders = this.limitOrders.filter((o) => o.status !== 'resting');
     this.showToast({
       kind: 'info',
       title: 'Open picks refunded',
@@ -791,6 +1032,21 @@ export class MarketStore {
     this.emitSlow();
   }
 
+  setChartView(view: ChartView) {
+    this.chartView = view;
+    this.emitSlow();
+  }
+
+  setCandleMs(ms: number) {
+    this.candleMs = ms;
+    this.emitSlow();
+  }
+
+  /** One tap on the market name flips between the simulator and real BTC. */
+  toggleMode() {
+    this.setMode(this.mode === 'sim' ? 'live' : 'sim');
+  }
+
   openSheet(sheet: SheetName, side?: Side) {
     if (side) this.ticketSide = side;
     if (sheet === 'book') this.book = this.bookSim.snapshot(this.quote.pUp);
@@ -811,6 +1067,7 @@ export class MarketStore {
   resetAccount() {
     this.balanceCents = STARTING_BALANCE_CENTS;
     this.positions = [];
+    this.limitOrders = [];
     this.combos = [];
     this.history = [];
     this.comboDraft = new Map();
@@ -918,6 +1175,7 @@ export class MarketStore {
         balanceCents: this.balanceCents,
         history: this.history,
         positions: this.positions.filter((p) => p.status === 'open'),
+        limitOrders: this.limitOrders.filter((o) => o.status === 'resting'),
         combos: this.combos.filter((c) => c.status === 'open'),
         simPrice: this.mode === 'sim' ? this.price : 0,
         simSeed: 0,

@@ -1,5 +1,6 @@
 import { useMarket } from '../store/useMarket';
 import type { Timeframe } from '../engine/types';
+import { CANDLE_INTERVALS } from '../engine/types';
 import { ArrowDown, ArrowUp } from './icons';
 
 const TIMEFRAMES: { key: Timeframe; label: string }[] = [
@@ -13,6 +14,9 @@ export function ControlsRow() {
   const store = useMarket();
   // Oldest on the left, matching how the strip reads on the real screen.
   const past = store.history.slice(0, 3).reverse();
+
+  // These all control the chart; on the orders tab they only steal room.
+  if (store.chartView === 'positions') return null;
 
   return (
     <div className="controls">
@@ -34,17 +38,31 @@ export function ControlsRow() {
         </span>
       </button>
 
-      <div className="timeframes">
-        {TIMEFRAMES.map((tf) => (
-          <button
-            key={tf.key}
-            className={store.timeframe === tf.key ? 'active' : ''}
-            onClick={() => store.setTimeframe(tf.key)}
-          >
-            {tf.label}
-          </button>
-        ))}
-      </div>
+      {store.chartView === 'candles' ? (
+        <div className="timeframes">
+          {CANDLE_INTERVALS.map((c) => (
+            <button
+              key={c.ms}
+              className={store.candleMs === c.ms ? 'active' : ''}
+              onClick={() => store.setCandleMs(c.ms)}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="timeframes">
+          {TIMEFRAMES.map((tf) => (
+            <button
+              key={tf.key}
+              className={store.timeframe === tf.key ? 'active' : ''}
+              onClick={() => store.setTimeframe(tf.key)}
+            >
+              {tf.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
