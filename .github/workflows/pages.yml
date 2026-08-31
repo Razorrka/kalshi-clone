@@ -1,10 +1,12 @@
 name: Deploy to GitHub Pages
 
+# Only main deploys. Running on a second branch as well meant two pushes
+# moments apart landed in the same concurrency group, where the newer run
+# cancelled the older one — and a branch that cannot deploy anyway was able
+# to cancel the one that could.
 on:
   push:
-    branches:
-      - main
-      - claude/jit-coin-simulation-wbr7e6
+    branches: [main]
   workflow_dispatch:
 
 # Needed by actions/deploy-pages to publish and to mint its OIDC token.
