@@ -3,6 +3,7 @@ import { Sheet } from './Sheet';
 import { ROUND_LENGTHS } from '../engine/rounds';
 import { VOL_PRESETS, type VolPreset } from '../engine/priceEngine';
 import { HOUSE_EDGE, LOCK_MS } from '../engine/odds';
+import { SIGNAL_RULES } from '../engine/signals';
 import { fmtMoney } from '../lib/format';
 
 const VOL_LABELS: Record<VolPreset, string> = {
@@ -96,6 +97,32 @@ export function SettingsSheet() {
               {VOL_LABELS[p]} · {Math.round(VOL_PRESETS[p] * 100)}%
             </button>
           ))}
+        </div>
+      </div>
+
+      <div className="setting">
+        <div className="setting-head">
+          <div className="grow">
+            <div className="k">Buy / sell markers</div>
+            <div className="d">
+              Triangles on the candle chart. A buy is marked when the{' '}
+              {SIGNAL_RULES.fastPeriod}-bar average crosses up through the{' '}
+              {SIGNAL_RULES.slowPeriod}-bar one and RSI({SIGNAL_RULES.rsiPeriod}) is
+              still under {SIGNAL_RULES.overbought}; a sell on the cross back down
+              with RSI over {SIGNAL_RULES.oversold}. Only closed bars are marked —
+              a marker on the bar still forming would appear and vanish as the
+              price moves.
+            </div>
+          </div>
+          <button
+            className={`switch${store.signalsOn ? ' on' : ''}`}
+            role="switch"
+            aria-checked={store.signalsOn}
+            aria-label="Buy and sell markers"
+            onClick={() => store.setSignals(!store.signalsOn)}
+          >
+            <i />
+          </button>
         </div>
       </div>
 

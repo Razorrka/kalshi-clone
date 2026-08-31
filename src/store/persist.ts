@@ -24,6 +24,7 @@ export interface PersistedState {
   simPrice: number;
   simSeed: number;
   hapticsOn: boolean;
+  signalsOn: boolean;
 }
 
 export function loadState(): Partial<PersistedState> | null {

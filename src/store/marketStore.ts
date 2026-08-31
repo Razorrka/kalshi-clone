@@ -95,6 +95,7 @@ export class MarketStore {
   roundMs = DEFAULT_ROUND_MS;
   volPreset: VolPreset = 'normal';
   hapticsOn = true;
+  signalsOn = true;
   feedStatus: FeedStatus = 'idle';
   feedDetail = '';
 
@@ -154,6 +155,7 @@ export class MarketStore {
       }
       if (Array.isArray(saved.history)) this.history = saved.history.slice(0, MAX_HISTORY);
       if (typeof saved.hapticsOn === 'boolean') this.hapticsOn = saved.hapticsOn;
+      if (typeof saved.signalsOn === 'boolean') this.signalsOn = saved.signalsOn;
     }
 
     this.annualVol = VOL_PRESETS[this.volPreset];
@@ -1085,6 +1087,12 @@ export class MarketStore {
     this.emitSlow();
   }
 
+  setSignals(on: boolean) {
+    this.signalsOn = on;
+    this.queueSave();
+    this.emitSlow();
+  }
+
   setHaptics(on: boolean) {
     this.hapticsOn = on;
     this.queueSave();
@@ -1248,6 +1256,7 @@ export class MarketStore {
         simPrice: this.mode === 'sim' ? this.price : 0,
         simSeed: 0,
         hapticsOn: this.hapticsOn,
+        signalsOn: this.signalsOn,
       });
     }, 250);
   }

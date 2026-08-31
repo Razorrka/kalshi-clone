@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { market } from '../store/marketStore';
 import { toCandles } from '../engine/candles';
+import { computeSignals } from '../engine/signals';
 import { fmtAxis, fmtUsd } from '../lib/format';
 import { niceStep } from '../lib/math';
 
@@ -8,6 +9,8 @@ const GUTTER = 94;
 const PAD_TOP = 34;
 const PAD_BOTTOM = 24;
 const SLOT = 17; // one candle plus its gap
+/** Bars fed to the indicators, well past what fits on screen. */
+const SIGNAL_LOOKBACK = 160;
 const BODY = 11;
 
 /**
@@ -57,6 +60,14 @@ export function CandleChart() {
       const maxBars = Math.max(3, Math.floor(plotRight / SLOT));
       const bars = toCandles(market.series, market.candleMs, maxBars);
       if (bars.length === 0) return;
+
+      // Indicators need warm-up well past the edge of the screen: a 13-bar
+      // average over the ~17 bars that fit would leave only a few evaluable
+      // points. Signals are computed over a long window and then drawn only
+      // where that window overlaps what is on screen.
+      const signals = market.signalsOn
+        ? computeSignals(toCandles(market.series, market.candleMs, SIGNAL_LOOKBACK))
+        : [];
 
       let lo = Infinity;
       let hi = -Infinity;
@@ -173,6 +184,35 @@ export function CandleChart() {
           ctx.restore();
         }
         ctx.globalAlpha = 1;
+      }
+
+      // ---- buy / sell markers ----------------------------------------------
+      const visible = new Map(bars.map((b) => [b.t, b]));
+      for (const sig of signals) {
+        const bar = visible.get(sig.t);
+        if (!bar) continue;
+        const x = xOf(sig.t);
+        if (x < -SLOT || x > plotRight + SLOT) continue;
+
+        const buy = sig.side === 'buy';
+        const colour = buy ? '#00dd94' : '#ff454d';
+        // Sit clear of the bar: below its low for a buy, above its high for a
+        // sell, so the marker never covers the price action it refers to.
+        const anchor = buy ? yOf(bar.low) + 13 : yOf(bar.high) - 13;
+        const tip = buy ? anchor - 7 : anchor + 7;
+
+        ctx.fillStyle = colour;
+        ctx.beginPath();
+        ctx.moveTo(x, tip);
+        ctx.lineTo(x - 5.5, anchor);
+        ctx.lineTo(x + 5.5, anchor);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.font = '800 9px ' + font;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(buy ? 'B' : 'S', x, buy ? anchor + 8 : anchor - 8);
       }
 
       // ---- live price tag --------------------------------------------------
