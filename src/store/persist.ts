@@ -7,6 +7,7 @@ import type {
   StrikeMode,
 } from '../engine/types';
 import type { VolPreset } from '../engine/priceEngine';
+import type { CallModel, LockedCall } from '../engine/caller';
 
 const KEY = 'jitcoin:v1';
 
@@ -27,6 +28,8 @@ export interface PersistedState {
   hapticsOn: boolean;
   signalsOn: boolean;
   signalKey: number;
+  calls: LockedCall[];
+  callModel: CallModel;
 }
 
 export function loadState(): Partial<PersistedState> | null {

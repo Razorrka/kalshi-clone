@@ -32,7 +32,23 @@ import type {
   Timeframe,
 } from '../engine/types';
 import { DEFAULT_CANDLE_MS } from '../engine/types';
-import { SIGNAL_RULES } from '../engine/signals';
+import { SIGNAL_RULES, computeSignals } from '../engine/signals';
+import { aggregateBars } from '../engine/candles';
+import {
+  INITIAL_MODEL,
+  callDeadlineFor,
+  callStats,
+  learn,
+  lockDelayFor,
+  makeCall,
+  outcomeFromGrade,
+  standardisedGap,
+  type CallFeatures,
+  type CallGrade,
+  type CallModel,
+  type CallStats,
+  type LockedCall,
+} from '../engine/caller';
 import { clearState, loadState, saveState } from './persist';
 
 /** ~5 Hz sampling keeps an hour of tape in a few thousand points. */
@@ -44,6 +60,10 @@ const MAX_HISTORY = 40;
 const MINUTE_MS = 60_000;
 const MAX_MINUTE_BARS = 1_500;
 const STARTING_BALANCE_CENTS = 1_000_00;
+/** Locked calls kept on file. Enough to read a hit rate off, not a ledger. */
+const MAX_CALLS = 60;
+/** How far back "momentum" looks when the call is made. */
+const MOMENTUM_WINDOW_MS = 120_000;
 
 export type SheetName =
   | 'book'
@@ -53,7 +73,8 @@ export type SheetName =
   | 'activity'
   | 'strike'
   | 'signals'
-  | 'balance';
+  | 'balance'
+  | 'calls';
 
 export interface Toast {
   id: number;
@@ -123,6 +144,12 @@ export class MarketStore {
   combos: ComboTicket[] = [];
   history: RoundResult[] = [];
 
+  // ---- the caller --------------------------------------------------------
+  /** Every call it has committed to, newest first. */
+  calls: LockedCall[] = [];
+  /** What it has learned from the ones that were graded. */
+  callModel: CallModel = INITIAL_MODEL;
+
   // ---- ui ----------------------------------------------------------------
   timeframe: Timeframe = 'live';
   strikeMode: StrikeMode = 'auto';
@@ -181,6 +208,16 @@ export class MarketStore {
       if (typeof saved.signalsOn === 'boolean') this.signalsOn = saved.signalsOn;
       if (typeof saved.signalKey === 'number' && saved.signalKey > 0) {
         this.signalKey = saved.signalKey;
+      }
+      if (Array.isArray(saved.calls)) this.calls = saved.calls.slice(0, MAX_CALLS);
+      // A model restored from storage decides real calls, so anything that is
+      // not four finite numbers goes back to the untrained prior.
+      const w = saved.callModel?.weights;
+      if (Array.isArray(w) && w.length === 4 && w.every((n) => Number.isFinite(n))) {
+        this.callModel = {
+          weights: [w[0], w[1], w[2], w[3]],
+          trained: Math.max(0, Math.round(saved.callModel?.trained ?? 0)),
+        };
       }
     }
 
@@ -333,6 +370,7 @@ export class MarketStore {
       this.catchUp(now, gap);
       this.maybeRollRound(now);
       this.recompute(now);
+      this.maybeLockCall(now);
       this.emitSlow();
       return;
     }
@@ -371,11 +409,12 @@ export class MarketStore {
     const rolled = this.maybeRollRound(now);
     this.recompute(now);
     const filled = this.fillRestingOrders(now);
+    const called = this.maybeLockCall(now);
     this.pollTape(now);
 
     if (this.sheet === 'book') this.book = this.bookSim.snapshot(this.quote.pUp);
 
-    if (rolled || filled) this.emitSlow();
+    if (rolled || filled || called) this.emitSlow();
     else this.emitFast();
   }
 
@@ -507,6 +546,7 @@ export class MarketStore {
 
     const closePrice = this.priceAt(this.round.endsAt);
     const settled = settleRound(this.round, closePrice);
+    this.recordCallOutcome(settled);
     this.settlePositions(settled);
     this.round = makeRound(now, this.roundMs, this.strikeFor(this.price));
     this.pruneComboDraft();
@@ -546,6 +586,11 @@ export class MarketStore {
       }
       return true;
     });
+    // A call on a round that went by unwatched has no honest result to grade,
+    // so it is dropped rather than counted either way.
+    this.calls = this.calls.filter(
+      (c) => c.outcome !== undefined || c.roundId === this.round.id,
+    );
     if (refunded <= 0) return;
     this.balanceCents += Math.round(refunded * 100);
     this.showToast({
@@ -1394,6 +1439,162 @@ export class MarketStore {
   }
 
   // =========================================================================
+  // the locked call
+  // =========================================================================
+
+  /** The call for the round now running, once it has been made. */
+  get currentCall(): LockedCall | null {
+    return this.calls.find((c) => c.roundId === this.round.id) ?? null;
+  }
+
+  /**
+   * The call the strip should be asking you about: the one that just finished.
+   *
+   * Only the round immediately gone by, so an ungraded call cannot sit in the
+   * strip forever and hide the live one. Anything older stays on file and can
+   * still be graded from the sheet.
+   */
+  get pendingGrade(): LockedCall | null {
+    return (
+      this.calls.find(
+        (c) =>
+          c.outcome !== undefined && !c.grade && c.roundIndex >= this.round.index - 1,
+      ) ?? null
+    );
+  }
+
+  /** Every finished call still missing your verdict, newest first. */
+  get gradableCalls(): LockedCall[] {
+    return this.calls.filter((c) => c.outcome !== undefined && !c.grade);
+  }
+
+  /** Milliseconds until this round's call commits. Zero once it has. */
+  get msToCall(): number {
+    if (this.currentCall) return 0;
+    return Math.max(0, this.round.startsAt + lockDelayFor(this.roundMs) - Date.now());
+  }
+
+  /** True when this round went past the point where a call was still useful. */
+  get callWindowClosed(): boolean {
+    if (this.currentCall) return false;
+    return Date.now() > this.round.startsAt + callDeadlineFor(this.roundMs);
+  }
+
+  get callRecord(): CallStats {
+    return callStats(this.calls);
+  }
+
+  /**
+   * What the model reads at the moment it commits.
+   *
+   * The bias and momentum windows are deliberately fixed rather than tied to
+   * the chart controls: a learned weight only means something if the feature
+   * behind it is measured the same way every time.
+   */
+  private callFeatures(now: number): CallFeatures {
+    const msLeft = Math.max(0, this.round.endsAt - now);
+    const z = standardisedGap(this.price, this.round.strike, this.annualVol, msLeft);
+    const past = this.priceAt(now - MOMENTUM_WINDOW_MS);
+    const momentum = past > 0 ? standardisedGap(this.price, past, this.annualVol, msLeft) : 0;
+    const bars = aggregateBars(this.minuteBars, DEFAULT_CANDLE_MS, 160);
+    const { state } = computeSignals(bars, SIGNAL_RULES);
+    const bias = state.bias === 'long' ? 1 : state.bias === 'short' ? -1 : 0;
+    return { z, bias, momentum };
+  }
+
+  /**
+   * Commits this round's call, once, at the four-minute mark.
+   *
+   * Everything about this method is built around not changing its mind: it
+   * returns early if a call already exists for the round, and nothing else in
+   * the store ever writes to `side` or `confidence` afterwards. A call that
+   * moved with the price would just be the price.
+   */
+  private maybeLockCall(now: number): boolean {
+    if (this.currentCall) return false;
+    if (now < this.round.startsAt + lockDelayFor(this.roundMs)) return false;
+    // Opened too late in the round to say anything worth grading.
+    if (now > this.round.startsAt + callDeadlineFor(this.roundMs)) return false;
+    // In live mode the price is still the simulator's until the first real
+    // tick lands; calling off that would be calling off nothing.
+    if (this.mode === 'live' && this.livePrice <= 0) return false;
+
+    const features = this.callFeatures(now);
+    const { side, confidence, pUp } = makeCall(features, this.callModel);
+    const call: LockedCall = {
+      id: `call-${this.idSeq++}`,
+      roundId: this.round.id,
+      roundIndex: this.round.index,
+      roundEndsAt: this.round.endsAt,
+      lockedAt: now,
+      side,
+      confidence,
+      pUp,
+      spot: this.price,
+      strike: this.round.strike,
+      features,
+      weights: [...this.callModel.weights] as [number, number, number, number],
+    };
+    this.calls = [call, ...this.calls].slice(0, MAX_CALLS);
+    this.buzz(14);
+    this.showToast({
+      kind: 'info',
+      title: `Call locked — ${side === 'up' ? 'YES, up' : 'NO, down'}`,
+      detail: `${Math.round(confidence * 100)}% confident. It will not change.`,
+    });
+    this.queueSave();
+    return true;
+  }
+
+  /** Records how the round actually went against whatever it called. */
+  private recordCallOutcome(round: Round) {
+    let touched = false;
+    this.calls = this.calls.map((c) => {
+      if (c.roundId !== round.id || c.outcome !== undefined) return c;
+      touched = true;
+      return { ...c, outcome: round.result!, closePrice: round.closePrice! };
+    });
+    if (touched) this.queueSave();
+  }
+
+  /**
+   * Your verdict on a finished call, and the only thing that trains the model.
+   *
+   * "Wrong" means the other side finished, which is exactly the label the
+   * gradient step needs — so pressing it is what makes the next call better.
+   */
+  gradeCall(id: string, grade: CallGrade): { ok: boolean; error?: string } {
+    const call = this.calls.find((c) => c.id === id);
+    if (!call) return { ok: false, error: 'That call is no longer on file' };
+    if (call.grade) return { ok: false, error: 'That call has already been graded' };
+    if (call.outcome === undefined) {
+      return { ok: false, error: 'Wait for the round to close first' };
+    }
+
+    this.callModel = learn(this.callModel, call.features, outcomeFromGrade(call, grade));
+    this.calls = this.calls.map((c) =>
+      c.id === id ? { ...c, grade, gradedAt: Date.now() } : c,
+    );
+    this.buzz(grade === 'right' ? [10, 30, 10] : 22);
+    this.queueSave();
+    this.emitSlow();
+    return { ok: true };
+  }
+
+  /** Forgets everything it has learned and goes back to the textbook prior. */
+  resetCaller() {
+    this.callModel = INITIAL_MODEL;
+    this.calls = [];
+    this.queueSave();
+    this.showToast({
+      kind: 'info',
+      title: 'Caller reset',
+      detail: 'Back to the pricing prior, with nothing learned',
+    });
+    this.emitSlow();
+  }
+
+  // =========================================================================
   // persistence
   // =========================================================================
 
@@ -1419,6 +1620,8 @@ export class MarketStore {
         hapticsOn: this.hapticsOn,
         signalsOn: this.signalsOn,
         signalKey: this.signalKey,
+        calls: this.calls,
+        callModel: this.callModel,
       });
     }, 250);
   }

@@ -213,6 +213,19 @@ export function Check({ size = 16 }: IconProps) {
   );
 }
 
+export function Cross({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path
+        d="M6.4 6.4l11.2 11.2M17.6 6.4L6.4 17.6"
+        stroke="currentColor"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function Backspace({ size = 20 }: IconProps) {
   return (
     <svg {...base(size)}>

@@ -711,3 +711,205 @@ describe('choosing your own practice balance', () => {
     expect(store.balanceCents).toBe(100_000_000_00);
   });
 });
+
+describe('the locked call', () => {
+  /** 16.2s into a one-minute round — the same 27% mark as 4m into 15m. */
+  const LOCK_AT = 16_200;
+
+  beforeEach(() => {
+    store = newStore();
+  });
+
+  it('says nothing until it reaches the mark, then commits', () => {
+    run(LOCK_AT - 2_000);
+    expect(store.currentCall).toBeNull();
+    expect(store.msToCall).toBeGreaterThan(0);
+
+    run(3_000);
+    const call = store.currentCall;
+    expect(call).not.toBeNull();
+    expect(call!.side === 'up' || call!.side === 'down').toBe(true);
+    expect(call!.confidence).toBeGreaterThanOrEqual(0.5);
+    expect(call!.confidence).toBeLessThanOrEqual(1);
+    expect(call!.roundId).toBe(store.round.id);
+    expect(store.msToCall).toBe(0);
+  });
+
+  it('never changes its answer for the rest of the round', () => {
+    run(LOCK_AT + 500);
+    const call = store.currentCall!;
+    const startPrice = store.price;
+
+    // Every remaining tick of the round, with the price moving underneath it.
+    for (let i = 0; i < 40; i++) {
+      run(1_000);
+      if (store.round.id !== call.roundId) break;
+      // Same object, not merely equal: nothing rewrites the call in place.
+      expect(store.currentCall).toBe(call);
+    }
+    expect(store.price).not.toBe(startPrice);
+    expect(store.currentCall === null || store.currentCall.side === call.side).toBe(true);
+  });
+
+  it('makes exactly one call per round', () => {
+    run(3 * MINUTE);
+    const rounds = new Set(store.calls.map((c) => c.roundId));
+    expect(store.calls.length).toBeGreaterThanOrEqual(2);
+    expect(rounds.size).toBe(store.calls.length);
+  });
+
+  it('records how the round actually went once it settles', () => {
+    run(LOCK_AT + 500);
+    const call = store.currentCall!;
+    expect(call.outcome).toBeUndefined();
+
+    run(MINUTE);
+    const settled = store.calls.find((c) => c.id === call.id)!;
+    expect(settled.outcome === 'up' || settled.outcome === 'down').toBe(true);
+    expect(settled.closePrice).toBeGreaterThan(0);
+    expect(settled.grade).toBeUndefined();
+    expect(store.pendingGrade?.id).toBe(call.id);
+  });
+});
+
+describe('grading a call', () => {
+  const LOCK_AT = 16_200;
+
+  beforeEach(() => {
+    store = newStore();
+  });
+
+  /** Runs to the first call and on past the bell, so it can be graded. */
+  function firstFinishedCall() {
+    run(LOCK_AT + 500);
+    const id = store.currentCall!.id;
+    run(MINUTE);
+    return store.calls.find((c) => c.id === id)!;
+  }
+
+  it('will not grade a call that is still running', () => {
+    run(LOCK_AT + 500);
+    const result = store.gradeCall(store.currentCall!.id, 'right');
+    expect(result.ok).toBe(false);
+    expect(store.callModel.trained).toBe(0);
+  });
+
+  it('learns from a call you mark wrong', () => {
+    const call = firstFinishedCall();
+    const before = [...store.callModel.weights];
+
+    expect(store.gradeCall(call.id, 'wrong').ok).toBe(true);
+    expect(store.callModel.trained).toBe(1);
+    expect(store.callModel.weights).not.toEqual(before);
+
+    // It learned toward the side it did not pick.
+    const wouldBe = store.callModel.weights[1] * call.features.z + store.callModel.weights[0];
+    const wasBefore = before[1] * call.features.z + before[0];
+    if (call.side === 'up') expect(wouldBe).toBeLessThan(wasBefore);
+    else expect(wouldBe).toBeGreaterThan(wasBefore);
+  });
+
+  it('barely moves when you mark it right', () => {
+    const call = firstFinishedCall();
+    const before = [...store.callModel.weights];
+    expect(store.gradeCall(call.id, 'right').ok).toBe(true);
+
+    // A confirmed call still nudges the weights, just far less than a miss.
+    const moved = store.callModel.weights.map((w, i) => Math.abs(w - before[i]));
+    expect(Math.max(...moved)).toBeGreaterThan(0);
+    expect(Math.max(...moved)).toBeLessThan(0.06);
+  });
+
+  it('refuses to grade the same call twice', () => {
+    const call = firstFinishedCall();
+    expect(store.gradeCall(call.id, 'right').ok).toBe(true);
+    expect(store.gradeCall(call.id, 'wrong').ok).toBe(false);
+    expect(store.callModel.trained).toBe(1);
+  });
+
+  it('keeps a record you can read a hit rate off', () => {
+    const call = firstFinishedCall();
+    store.gradeCall(call.id, 'right');
+    const record = store.callRecord;
+    expect(record.graded).toBe(1);
+    expect(record.right).toBe(1);
+    expect(record.hitRate).toBe(1);
+    expect(record.streak).toBe(1);
+  });
+
+  it('forgets everything on a reset', () => {
+    const call = firstFinishedCall();
+    store.gradeCall(call.id, 'wrong');
+    store.resetCaller();
+    expect(store.calls).toHaveLength(0);
+    expect(store.callModel.trained).toBe(0);
+    expect(store.callRecord.hitRate).toBeNull();
+  });
+
+  it('drops a call whose round went by while the tab was asleep', () => {
+    run(LOCK_AT + 500);
+    expect(store.currentCall).not.toBeNull();
+
+    sleepTab(30 * MINUTE);
+    // Nothing ungraded is left over claiming a result nobody watched.
+    for (const c of store.calls) {
+      expect(c.outcome === undefined && c.roundId !== store.round.id).toBe(false);
+    }
+    expect(store.callRecord.graded).toBe(0);
+  });
+});
+
+describe('opening the app too late in a round', () => {
+  it('says nothing rather than calling a round that is nearly over', () => {
+    // 52s into a one-minute round: past the 16.2s mark, but past the 43.8s
+    // deadline too, so there is nothing left worth committing to.
+    store = newStore(T0 + 52_000);
+    run(2_000);
+    expect(store.currentCall).toBeNull();
+    expect(store.callWindowClosed).toBe(true);
+
+    // The next round gets its call as normal.
+    run(MINUTE);
+    expect(store.currentCall).not.toBeNull();
+    expect(store.callWindowClosed).toBe(false);
+  });
+});
+
+describe('a call you did not get around to grading', () => {
+  const LOCK_AT = 16_200;
+
+  beforeEach(() => {
+    store = newStore();
+  });
+
+  it('stops asking once the next call has locked, so it cannot hide the live one', () => {
+    run(LOCK_AT + 500);
+    const first = store.currentCall!.id;
+
+    // Past the bell: the finished call is what the strip should be asking about.
+    run(MINUTE - LOCK_AT + 1_000);
+    expect(store.pendingGrade?.id).toBe(first);
+
+    // Two rounds on, it has had its moment and steps aside.
+    run(2 * MINUTE);
+    expect(store.pendingGrade?.id).not.toBe(first);
+  });
+
+  it('stays on file so it can still be graded from the sheet', () => {
+    run(LOCK_AT + 500);
+    const first = store.currentCall!.id;
+    run(3 * MINUTE);
+
+    expect(store.gradableCalls.map((c) => c.id)).toContain(first);
+    expect(store.gradeCall(first, 'right').ok).toBe(true);
+    expect(store.callRecord.graded).toBe(1);
+  });
+
+  it('is left out of the record entirely until it is graded', () => {
+    run(4 * MINUTE);
+    expect(store.gradableCalls.length).toBeGreaterThan(1);
+    expect(store.callRecord.graded).toBe(0);
+    expect(store.callRecord.hitRate).toBeNull();
+    expect(store.callModel.trained).toBe(0);
+  });
+});

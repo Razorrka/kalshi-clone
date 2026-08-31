@@ -1844,3 +1844,317 @@ input {
   color: var(--accent);
   flex: none;
 }
+
+/* ---- the locked call ---------------------------------------------------- */
+
+.call-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 46px);
+  margin: 6px 23px 0;
+  padding: 7px 9px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid #1e232b;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  flex: none;
+  position: relative;
+  overflow: hidden;
+}
+.call-strip.yes {
+  border-color: rgba(0, 221, 148, 0.3);
+  background: linear-gradient(90deg, rgba(0, 221, 148, 0.08), var(--surface) 60%);
+}
+.call-strip.no {
+  border-color: rgba(255, 69, 77, 0.3);
+  background: linear-gradient(90deg, rgba(255, 69, 77, 0.08), var(--surface) 60%);
+}
+.call-strip.grading {
+  display: block;
+  border-color: rgba(255, 159, 25, 0.42);
+  background: linear-gradient(90deg, rgba(255, 159, 25, 0.09), var(--surface) 70%);
+}
+.call-strip .dim {
+  color: var(--muted-2);
+  font-weight: 600;
+}
+.call-strip .call-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.call-badge {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  flex: none;
+}
+.call-badge.yes {
+  color: var(--ink);
+  background: var(--up);
+}
+.call-badge.no {
+  color: var(--ink);
+  background: var(--down);
+}
+.call-badge.pending {
+  color: var(--muted);
+  background: var(--surface-2);
+  letter-spacing: 1.5px;
+}
+.call-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: #1b1f26;
+}
+.call-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+.call-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.call-grade {
+  display: flex;
+  gap: 7px;
+  margin-top: 7px;
+}
+.grade-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 0;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  border: 1px solid transparent;
+}
+.grade-btn.right {
+  color: var(--up);
+  background: rgba(0, 221, 148, 0.12);
+  border-color: rgba(0, 221, 148, 0.35);
+}
+.grade-btn.wrong {
+  color: var(--down);
+  background: rgba(255, 69, 77, 0.12);
+  border-color: rgba(255, 69, 77, 0.35);
+}
+.grade-btn:active {
+  transform: scale(0.98);
+}
+
+.call-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+.call-card.yes {
+  border-color: rgba(0, 221, 148, 0.28);
+}
+.call-card.no {
+  border-color: rgba(255, 69, 77, 0.28);
+}
+.call-card-title {
+  font-size: 15px;
+  font-weight: 800;
+}
+.call-card-sub {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.call-factors {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  margin: 10px 0;
+}
+.call-factor {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 8px;
+  text-align: center;
+}
+.call-factor .k {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--muted-2);
+  letter-spacing: 0.2px;
+}
+.call-factor .v {
+  font-size: 16px;
+  font-weight: 800;
+  margin: 3px 0 1px;
+}
+.call-factor .s {
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.calibration {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.calib-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.calib-label {
+  width: 64px;
+  color: var(--muted);
+  flex: none;
+}
+.calib-bars {
+  flex: 1;
+  position: relative;
+  height: 16px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.calib-bars .actual {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+  border-radius: 4px 0 0 4px;
+}
+.calib-bars .claimed {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text);
+  opacity: 0.75;
+  border-radius: 1px;
+}
+.calib-count {
+  width: 38px;
+  text-align: right;
+  color: var(--muted-2);
+  flex: none;
+}
+
+.call-log {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+.call-log-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  font-size: 12px;
+  font-weight: 700;
+}
+.call-log-row .grow {
+  flex: 1;
+}
+.call-log-row .dim {
+  color: var(--muted-2);
+}
+.call-log-row .ok {
+  color: var(--up);
+}
+.call-log-row .bad {
+  color: var(--down);
+}
+.call-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.call-dot.right {
+  background: var(--up);
+}
+.call-dot.wrong {
+  background: var(--down);
+}
+.call-mini {
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.call-mini.yes {
+  color: var(--up);
+  background: rgba(0, 221, 148, 0.14);
+}
+.call-mini.no {
+  color: var(--down);
+  background: rgba(255, 69, 77, 0.14);
+}
+.section-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  margin: 14px 0 8px;
+}
+.call-text.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  white-space: normal;
+  line-height: 1.25;
+}
+.call-log-row.ungraded {
+  background: var(--surface);
+  border: 1px solid #2a2118;
+  margin-bottom: 5px;
+}
+.mini-grade {
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 6px;
+  flex: none;
+  border: 1px solid transparent;
+}
+.mini-grade.right {
+  color: var(--up);
+  background: rgba(0, 221, 148, 0.12);
+  border-color: rgba(0, 221, 148, 0.3);
+}
+.mini-grade.wrong {
+  color: var(--down);
+  background: rgba(255, 69, 77, 0.12);
+  border-color: rgba(255, 69, 77, 0.3);
+}

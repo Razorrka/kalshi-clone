@@ -21,6 +21,8 @@ import { StrikeSheet } from './components/StrikeSheet';
 import { SignalsSheet } from './components/SignalsSheet';
 import { BalanceSheet } from './components/BalanceSheet';
 import { SignalReadout } from './components/SignalReadout';
+import { CallStrip } from './components/CallStrip';
+import { CallsSheet } from './components/CallsSheet';
 import { ResultToast } from './components/ResultToast';
 
 export default function App() {
@@ -51,6 +53,7 @@ export default function App() {
             {store.chartView === 'positions' && <PositionsPanel />}
             <ResultToast />
           </div>
+          <CallStrip />
           <SignalReadout />
           <ControlsRow />
           <TradeArea />
@@ -65,6 +68,7 @@ export default function App() {
         {store.sheet === 'strike' && <StrikeSheet />}
         {store.sheet === 'signals' && <SignalsSheet />}
         {store.sheet === 'balance' && <BalanceSheet />}
+        {store.sheet === 'calls' && <CallsSheet />}
       </div>
     </div>
   );
