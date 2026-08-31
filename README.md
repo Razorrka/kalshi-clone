@@ -36,9 +36,15 @@ The repo deploys itself to GitHub Pages on every push to `main` or the feature
 branch (`.github/workflows/pages.yml`), building at `/kalshi-clone/` and
 publishing `dist/`.
 
-One-time setup in the repo: **Settings → Pages → Build and deployment →
-Source: GitHub Actions**. The repo also has to be public, unless the account
-has a plan that allows Pages on private repos.
+Two things have to be true before the first deploy succeeds:
+
+1. **Pages is enabled**, at **Settings → Pages → Build and deployment →
+   Source: GitHub Actions**. The workflow asks `configure-pages` to turn this
+   on itself, but the Actions token is usually not allowed to create a Pages
+   site, so expect to flip it by hand once.
+2. **The repository is public**, unless the account is on a plan that permits
+   Pages on private repositories. On a free account a private repo cannot
+   publish a Pages site at all.
 
 Once it is live, open the URL in Safari, tap **Share → Add to Home Screen**.
 It installs as a standalone app: no browser chrome, its own icon, and the
