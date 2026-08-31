@@ -113,6 +113,13 @@ export interface RoundResult {
   staked: number;
 }
 
+/**
+ * Where the round's target comes from. 'auto' takes the price at the moment
+ * the round opened; 'manual' holds whatever the user typed, so the market can
+ * be lined up against a real book's strike.
+ */
+export type StrikeMode = 'auto' | 'manual';
+
 export type ChartView = 'line' | 'candles' | 'positions';
 
 /** Candle widths offered in the candlestick view. */

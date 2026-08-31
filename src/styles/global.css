@@ -316,6 +316,29 @@ input {
   white-space: nowrap;
 }
 
+.target-col {
+  text-align: left;
+  border-radius: 10px;
+  transition: opacity 0.15s ease;
+}
+
+.target-col:active {
+  opacity: 0.6;
+}
+
+.manual-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 159, 25, 0.18);
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  vertical-align: 2px;
+}
+
 .price-strip .vrule {
   width: 1px;
   background: #292e36;

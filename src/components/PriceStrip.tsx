@@ -12,10 +12,17 @@ export function PriceStrip() {
 
   return (
     <div className="price-strip">
-      <div className="price-col">
-        <div className="label">Target · {fmtTargetTime(store.round.endsAt)}</div>
+      <button
+        className="price-col target-col"
+        onClick={() => store.openSheet('strike')}
+        aria-label="Set the target price"
+      >
+        <div className="label">
+          Target · {fmtTargetTime(store.round.endsAt)}
+          {store.strikeMode === 'manual' && <span className="manual-tag">SET</span>}
+        </div>
         <div className="value tnum">{waiting ? '—' : fmtUsd(store.round.strike)}</div>
-      </div>
+      </button>
 
       <div className="vrule" />
 

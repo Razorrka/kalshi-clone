@@ -17,6 +17,7 @@ import { SECONDS_PER_YEAR, clamp } from '../lib/math';
 import { DEFAULT_ROUND_MS, makeRound, roundBounds, settleRound } from '../engine/rounds';
 import type {
   ChartView,
+  StrikeMode,
   ComboLeg,
   ComboTicket,
   FeedMode,
@@ -39,7 +40,13 @@ const MAX_TAPE = 4;
 const MAX_HISTORY = 40;
 const STARTING_BALANCE_CENTS = 1_000_00;
 
-export type SheetName = 'book' | 'ticket' | 'settings' | 'combo' | 'activity';
+export type SheetName =
+  | 'book'
+  | 'ticket'
+  | 'settings'
+  | 'combo'
+  | 'activity'
+  | 'strike';
 
 export interface Toast {
   id: number;
@@ -100,6 +107,9 @@ export class MarketStore {
 
   // ---- ui ----------------------------------------------------------------
   timeframe: Timeframe = 'live';
+  strikeMode: StrikeMode = 'auto';
+  /** The pinned target, held across rounds while strikeMode is 'manual'. */
+  manualStrike = 0;
   chartView: ChartView = 'line';
   candleMs: number = DEFAULT_CANDLE_MS;
   sheet: SheetName | null = null;
@@ -135,6 +145,10 @@ export class MarketStore {
       if (saved.volPreset && saved.volPreset in VOL_PRESETS) {
         this.volPreset = saved.volPreset;
       }
+      if (saved.strikeMode === 'manual' && (saved.manualStrike ?? 0) > 0) {
+        this.strikeMode = 'manual';
+        this.manualStrike = saved.manualStrike!;
+      }
       if (typeof saved.balanceCents === 'number') {
         this.balanceCents = Math.max(0, Math.round(saved.balanceCents));
       }
@@ -152,7 +166,7 @@ export class MarketStore {
     this.price = this.prevPrice = this.livePrice = this.engine.price;
 
     const now = Date.now();
-    this.round = makeRound(now, this.roundMs, this.price);
+    this.round = makeRound(now, this.roundMs, this.strikeFor(this.price));
     this.refundStale(saved?.positions, saved?.combos, saved?.limitOrders);
     this.recompute(now);
   }
@@ -230,7 +244,10 @@ export class MarketStore {
     for (const pt of points) pt.p = Math.round((pt.p + offset) * 100) / 100;
     this.series = points;
     const bounds = roundBounds(now, this.roundMs);
-    this.round = { ...this.round, strike: this.priceAt(bounds.startsAt) };
+    this.round = {
+      ...this.round,
+      strike: this.strikeFor(this.priceAt(bounds.startsAt)),
+    };
   }
 
   // =========================================================================
@@ -399,7 +416,7 @@ export class MarketStore {
     const closePrice = this.priceAt(this.round.endsAt);
     const settled = settleRound(this.round, closePrice);
     this.settlePositions(settled);
-    this.round = makeRound(now, this.roundMs, this.price);
+    this.round = makeRound(now, this.roundMs, this.strikeFor(this.price));
     this.pruneComboDraft();
     this.voidUnsettled(now);
     this.queueSave();
@@ -996,7 +1013,54 @@ export class MarketStore {
     }
     this.lastStepAt = Date.now();
     // The strike belongs to the old series; re-anchor to the new feed.
-    this.round = { ...this.round, strike: this.price };
+    this.round = { ...this.round, strike: this.strikeFor(this.price) };
+    this.queueSave();
+    this.emitSlow();
+  }
+
+  /** The override wins over any automatically derived target. */
+  private strikeFor(auto: number): number {
+    return this.strikeMode === 'manual' && this.manualStrike > 0
+      ? this.manualStrike
+      : auto;
+  }
+
+  /**
+   * Pins the target to a price you supply, so this market can be lined up
+   * against the strike a real book is quoting. It holds across rounds until
+   * cleared — a real strike does not move just because our clock rolled over.
+   *
+   * Open tickets were priced against the old target, so they are refunded
+   * rather than silently repriced against a target they never agreed to.
+   */
+  setManualStrike(value: number): { ok: boolean; error?: string } {
+    const strike = Math.round(value * 100) / 100;
+    if (!Number.isFinite(strike) || strike <= 0) {
+      return { ok: false, error: 'Enter a price above zero' };
+    }
+    if (strike === this.round.strike && this.strikeMode === 'manual') {
+      return { ok: true };
+    }
+    this.refundOpenTickets('the target changed');
+    this.strikeMode = 'manual';
+    this.manualStrike = strike;
+    this.round = { ...this.round, strike };
+    this.recompute(Date.now());
+    this.queueSave();
+    this.emitSlow();
+    return { ok: true };
+  }
+
+  /** Hands the target back to the price at the round's open. */
+  clearManualStrike() {
+    if (this.strikeMode === 'auto') return;
+    this.refundOpenTickets('the target changed');
+    this.strikeMode = 'auto';
+    this.manualStrike = 0;
+    const bounds = roundBounds(Date.now(), this.roundMs);
+    const at = this.priceAt(bounds.startsAt);
+    this.round = { ...this.round, strike: at > 0 ? at : this.price };
+    this.recompute(Date.now());
     this.queueSave();
     this.emitSlow();
   }
@@ -1007,7 +1071,7 @@ export class MarketStore {
     this.roundMs = roundMs;
     const now = Date.now();
     const bounds = roundBounds(now, roundMs);
-    this.round = makeRound(now, roundMs, this.priceAt(bounds.startsAt));
+    this.round = makeRound(now, roundMs, this.strikeFor(this.priceAt(bounds.startsAt)));
     this.comboDraft = new Map();
     this.queueSave();
     this.emitSlow();
@@ -1071,6 +1135,8 @@ export class MarketStore {
     this.combos = [];
     this.history = [];
     this.comboDraft = new Map();
+    this.strikeMode = 'auto';
+    this.manualStrike = 0;
     clearState();
     this.queueSave();
     this.showToast({
@@ -1150,7 +1216,7 @@ export class MarketStore {
   private reanchorStrike() {
     const bounds = roundBounds(Date.now(), this.roundMs);
     const at = this.priceAt(bounds.startsAt);
-    this.round = { ...this.round, strike: at > 0 ? at : this.price };
+    this.round = { ...this.round, strike: this.strikeFor(at > 0 ? at : this.price) };
   }
 
   private disconnectLive() {
@@ -1172,6 +1238,8 @@ export class MarketStore {
         mode: this.mode,
         roundMs: this.roundMs,
         volPreset: this.volPreset,
+        strikeMode: this.strikeMode,
+        manualStrike: this.manualStrike,
         balanceCents: this.balanceCents,
         history: this.history,
         positions: this.positions.filter((p) => p.status === 'open'),

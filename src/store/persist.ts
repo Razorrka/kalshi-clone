@@ -4,6 +4,7 @@ import type {
   LimitOrder,
   Position,
   RoundResult,
+  StrikeMode,
 } from '../engine/types';
 import type { VolPreset } from '../engine/priceEngine';
 
@@ -13,6 +14,8 @@ export interface PersistedState {
   mode: FeedMode;
   roundMs: number;
   volPreset: VolPreset;
+  strikeMode: StrikeMode;
+  manualStrike: number;
   balanceCents: number;
   history: RoundResult[];
   positions: Position[];

@@ -17,6 +17,7 @@ import { TicketSheet } from './components/TicketSheet';
 import { ComboSheet } from './components/ComboSheet';
 import { SettingsSheet } from './components/SettingsSheet';
 import { ActivitySheet } from './components/ActivitySheet';
+import { StrikeSheet } from './components/StrikeSheet';
 import { ResultToast } from './components/ResultToast';
 
 export default function App() {
@@ -57,6 +58,7 @@ export default function App() {
         {store.sheet === 'combo' && <ComboSheet />}
         {store.sheet === 'settings' && <SettingsSheet />}
         {store.sheet === 'activity' && <ActivitySheet />}
+        {store.sheet === 'strike' && <StrikeSheet />}
       </div>
     </div>
   );

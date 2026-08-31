@@ -539,3 +539,91 @@ describe('closing a position early', () => {
     );
   });
 });
+
+describe('setting the target by hand', () => {
+  beforeEach(() => {
+    store = newStore();
+  });
+
+  it('pins the target and reprices the market against it', () => {
+    const spot = store.price;
+    expect(store.strikeMode).toBe('auto');
+
+    expect(store.setManualStrike(spot + 500).ok).toBe(true);
+
+    expect(store.strikeMode).toBe('manual');
+    expect(store.round.strike).toBe(Math.round((spot + 500) * 100) / 100);
+    // A target far above the price makes Up the unlikely side.
+    expect(store.quote.pUp).toBeLessThan(0.5);
+    expect(store.quote.downMultiplier).toBeLessThan(store.quote.upMultiplier);
+  });
+
+  it('holds the pinned target across a round rollover', () => {
+    const pinned = 12_345.67;
+    store.setManualStrike(pinned);
+    const firstRound = store.round.id;
+
+    run(MINUTE);
+
+    expect(store.round.id).not.toBe(firstRound);
+    expect(store.round.strike).toBe(pinned);
+    expect(store.strikeMode).toBe('manual');
+  });
+
+  it('rejects a target of zero or below', () => {
+    expect(store.setManualStrike(0)).toEqual({
+      ok: false,
+      error: 'Enter a price above zero',
+    });
+    expect(store.setManualStrike(-5).ok).toBe(false);
+    expect(store.setManualStrike(Number.NaN).ok).toBe(false);
+    expect(store.strikeMode).toBe('auto');
+  });
+
+  it('refunds open tickets, which were bought against the old target', () => {
+    const before = store.balanceCents;
+    store.placeBet('up', 40);
+    expect(store.balanceCents).toBe(before - 4_000);
+
+    store.setManualStrike(store.price + 100);
+
+    expect(store.balanceCents).toBe(before);
+    expect(store.openPositions).toHaveLength(0);
+  });
+
+  it('hands the target back to the round open when cleared', () => {
+    store.setManualStrike(999);
+    expect(store.round.strike).toBe(999);
+
+    store.clearManualStrike();
+
+    expect(store.strikeMode).toBe('auto');
+    expect(store.round.strike).not.toBe(999);
+    expect(store.round.strike).toBeGreaterThan(0);
+  });
+
+  it('goes back to tracking the round open after being cleared', () => {
+    store.setManualStrike(999);
+    store.clearManualStrike();
+    const before = store.round.strike;
+
+    run(MINUTE);
+
+    // A fresh automatic target, not the pinned one.
+    expect(store.round.strike).not.toBe(999);
+    expect(store.round.strike).not.toBe(before);
+  });
+
+  it('survives a round length change', () => {
+    store.setManualStrike(4_242);
+    store.setRoundMs(5 * MINUTE);
+    expect(store.round.strike).toBe(4_242);
+  });
+
+  it('is dropped by an account reset', () => {
+    store.setManualStrike(4_242);
+    store.resetAccount();
+    expect(store.strikeMode).toBe('auto');
+    expect(store.manualStrike).toBe(0);
+  });
+});
