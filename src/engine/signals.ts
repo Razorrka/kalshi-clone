@@ -133,9 +133,16 @@ export function atr(candles: Candle[], period: number): (number | null)[] {
   return out;
 }
 
-/** How many closed bars are needed before anything can fire. */
+/**
+ * How many closed bars are needed before anything can fire.
+ *
+ * Only the ATR warm-up gates a signal. The DEMA needs roughly twice its
+ * period before it produces anything, but it is an overlay drawn for context
+ * — holding signals back for it starved the wider candle widths of history
+ * they did not need.
+ */
 export function minimumBars(config: SignalConfig = SIGNAL_RULES): number {
-  return Math.max(config.atrPeriod, config.demaPeriod * 2) + 2;
+  return config.atrPeriod + 2;
 }
 
 /**

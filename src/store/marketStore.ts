@@ -16,6 +16,7 @@ import {
 import { SECONDS_PER_YEAR, clamp } from '../lib/math';
 import { DEFAULT_ROUND_MS, makeRound, roundBounds, settleRound } from '../engine/rounds';
 import type {
+  Candle,
   ChartView,
   StrikeMode,
   ComboLeg,
@@ -39,6 +40,9 @@ const SAMPLE_MS = 200;
 const SERIES_WINDOW_MS = 185 * 60_000;
 const MAX_TAPE = 4;
 const MAX_HISTORY = 40;
+/** One-minute bars kept for the candle chart: a full day, at 1,440 rows. */
+const MINUTE_MS = 60_000;
+const MAX_MINUTE_BARS = 1_500;
 const STARTING_BALANCE_CENTS = 1_000_00;
 
 export type SheetName =
@@ -71,6 +75,12 @@ type Listener = () => void;
 export class MarketStore {
   // ---- market state ------------------------------------------------------
   series: Tick[] = [];
+  /**
+   * Completed one-minute bars, going back far further than the tick tape.
+   * Candle widths are all whole minutes, so every one of them is built from
+   * these rather than from ticks the app cannot afford to keep.
+   */
+  minuteBars: Candle[] = [];
   price = 0;
   prevPrice = 0;
   /** Direction of the most recent price change. */
@@ -261,11 +271,50 @@ export class MarketStore {
     const offset = this.price - warm.price;
     for (const pt of points) pt.p = Math.round((pt.p + offset) * 100) / 100;
     this.series = points;
+    this.minuteBars = this.warmMinuteBars(now);
     const bounds = roundBounds(now, this.roundMs);
     this.round = {
       ...this.round,
       strike: this.strikeFor(this.priceAt(bounds.startsAt)),
     };
+  }
+
+  /**
+   * A day of one-minute bars, run at five-second granularity so the wicks are
+   * real rather than straight lines between closes. Around 17,000 steps, which
+   * costs a few milliseconds once at startup.
+   */
+  private warmMinuteBars(now: number): Candle[] {
+    const step = 5_000;
+    const span = MAX_MINUTE_BARS * MINUTE_MS;
+    const warm = new PriceEngine({
+      seed: Math.floor(Math.random() * 0xffffffff),
+      startPrice: this.price,
+      annualVol: this.annualVol,
+    });
+    const bars: Candle[] = [];
+    for (let t = now - span; t <= now; t += step) {
+      const price = warm.step(step);
+      const bucket = Math.floor(t / MINUTE_MS) * MINUTE_MS;
+      const last = bars[bars.length - 1];
+      if (!last || last.t !== bucket) {
+        bars.push({ t: bucket, open: price, high: price, low: price, close: price, live: false });
+      } else {
+        if (price > last.high) last.high = price;
+        if (price < last.low) last.low = price;
+        last.close = price;
+      }
+    }
+    // Land the warm-up on the live price so the history joins the tape.
+    const drift = this.price - warm.price;
+    for (const b of bars) {
+      b.open += drift;
+      b.high += drift;
+      b.low += drift;
+      b.close += drift;
+    }
+    if (bars.length) bars[bars.length - 1].live = true;
+    return bars;
   }
 
   // =========================================================================
@@ -311,6 +360,7 @@ export class MarketStore {
       this.lastSampleAt = now;
       this.series.push({ t: now, p: this.price });
       this.trimSeries(now);
+      this.recordMinuteBar(now, this.price);
     }
 
     const past = this.priceAt(now - 1_500);
@@ -352,6 +402,30 @@ export class MarketStore {
     this.prevPrice = this.price;
     this.tickDir = next > this.price ? 1 : -1;
     this.price = next;
+  }
+
+  /** Folds a sample into the minute bar it belongs to, opening one if needed. */
+  private recordMinuteBar(t: number, price: number) {
+    const bucket = Math.floor(t / MINUTE_MS) * MINUTE_MS;
+    const last = this.minuteBars[this.minuteBars.length - 1];
+    if (!last || last.t !== bucket) {
+      if (last) last.live = false;
+      this.minuteBars.push({
+        t: bucket,
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+        live: true,
+      });
+      if (this.minuteBars.length > MAX_MINUTE_BARS) {
+        this.minuteBars.splice(0, this.minuteBars.length - MAX_MINUTE_BARS);
+      }
+      return;
+    }
+    if (price > last.high) last.high = price;
+    if (price < last.low) last.low = price;
+    last.close = price;
   }
 
   private trimSeries(now: number) {
@@ -1017,6 +1091,7 @@ export class MarketStore {
     this.mode = mode;
     this.livePrice = 0;
     this.series = [];
+    this.minuteBars = [];
     this.lastSampleAt = 0;
     this.volEstimateAt = 0;
     this.annualVol = VOL_PRESETS[this.volPreset];
@@ -1269,6 +1344,20 @@ export class MarketStore {
       onHistory: (ticks) => {
         if (this.mode !== 'live') return;
         this.series = [...ticks, ...this.series].sort((a, b) => a.t - b.t);
+        // Seed the bar history from the same candles, so the candle chart has
+        // depth immediately rather than building it a minute at a time.
+        const seeded: Candle[] = ticks.map((t) => ({
+          t: Math.floor(t.t / MINUTE_MS) * MINUTE_MS,
+          open: t.p,
+          high: t.p,
+          low: t.p,
+          close: t.p,
+          live: false,
+        }));
+        const known = new Set(this.minuteBars.map((b) => b.t));
+        this.minuteBars = [...seeded.filter((b) => !known.has(b.t)), ...this.minuteBars]
+          .sort((a, b) => a.t - b.t)
+          .slice(-MAX_MINUTE_BARS);
         if (this.livePrice <= 0) {
           // Candles are real prices, so they are a legitimate first quote.
           this.livePrice = ticks[ticks.length - 1].p;

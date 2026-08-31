@@ -48,3 +48,44 @@ export function toCandles(
 
   return bars;
 }
+
+/**
+ * Merges finished bars into wider ones.
+ *
+ * The chart keeps a long history of one-minute bars rather than raw ticks —
+ * a day of ticks is hundreds of thousands of points, a day of minute bars is
+ * 1,440 — and every candle width the UI offers is a whole number of minutes,
+ * so it can be built from them.
+ */
+export function aggregateBars(
+  bars: Candle[],
+  bucketMs: number,
+  maxBars: number,
+  now = Date.now(),
+): Candle[] {
+  if (bars.length === 0 || bucketMs <= 0) return [];
+
+  const currentBucket = Math.floor(now / bucketMs) * bucketMs;
+  const from = currentBucket - (maxBars - 1) * bucketMs;
+
+  const out: Candle[] = [];
+  let current: Candle | null = null;
+
+  for (const bar of bars) {
+    if (bar.t < from) continue;
+    const bucket = Math.floor(bar.t / bucketMs) * bucketMs;
+    if (!current || current.t !== bucket) {
+      if (current) out.push(current);
+      current = { ...bar, t: bucket, live: false };
+    } else {
+      if (bar.high > current.high) current.high = bar.high;
+      if (bar.low < current.low) current.low = bar.low;
+      current.close = bar.close;
+    }
+  }
+  if (current) out.push(current);
+
+  const last = out[out.length - 1];
+  if (last && last.t === currentBucket) last.live = true;
+  return out;
+}

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { market } from '../store/marketStore';
-import { toCandles } from '../engine/candles';
+import { aggregateBars } from '../engine/candles';
 import { SIGNAL_RULES, computeSignals } from '../engine/signals';
 import { fmtAxis, fmtUsd } from '../lib/format';
 import { niceStep } from '../lib/math';
@@ -8,10 +8,10 @@ import { niceStep } from '../lib/math';
 const GUTTER = 94;
 const PAD_TOP = 34;
 const PAD_BOTTOM = 24;
-const SLOT = 17; // one candle plus its gap
+const SLOT = 11; // one candle plus its gap
 /** Bars fed to the indicators, well past what fits on screen. */
 const SIGNAL_LOOKBACK = 160;
-const BODY = 11;
+const BODY = 7;
 
 /**
  * Candlesticks built from the same tape the line chart draws, so the two views
@@ -58,14 +58,14 @@ export function CandleChart() {
       if (plotRight <= 8 || plotHeight <= 8) return;
 
       const maxBars = Math.max(3, Math.floor(plotRight / SLOT));
-      const bars = toCandles(market.series, market.candleMs, maxBars);
+      const bars = aggregateBars(market.minuteBars, market.candleMs, maxBars);
       if (bars.length === 0) return;
 
       // Indicators need warm-up well past the edge of the screen: a 13-bar
       // average over the ~17 bars that fit would leave only a few evaluable
       // points. Signals are computed over a long window and then drawn only
       // where that window overlaps what is on screen.
-      const signalBars = toCandles(market.series, market.candleMs, SIGNAL_LOOKBACK);
+      const signalBars = aggregateBars(market.minuteBars, market.candleMs, SIGNAL_LOOKBACK);
       const study = computeSignals(signalBars, {
         ...SIGNAL_RULES,
         keyValue: market.signalKey,

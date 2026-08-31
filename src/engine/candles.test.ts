@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { toCandles } from './candles';
-import type { Tick } from './types';
+import { aggregateBars, toCandles } from './candles';
+import type { Candle, Tick } from './types';
 
 const MIN = 60_000;
 const T0 = Date.parse('2026-03-04T15:00:00Z');
@@ -159,5 +159,76 @@ describe('accuracy against a brute-force recomputation', () => {
       const open = bars[i].open;
       expect(Math.abs(open - prevClose) / prevClose).toBeLessThan(0.005);
     }
+  });
+});
+
+describe('aggregateBars', () => {
+  const minute = (i: number, o: number, h: number, l: number, c: number): Candle => ({
+    t: T0 + i * MIN,
+    open: o,
+    high: h,
+    low: l,
+    close: c,
+    live: false,
+  });
+
+  it('merges minute bars into a wider one, keeping the true extremes', () => {
+    const input = [
+      minute(0, 100, 105, 99, 104),
+      minute(1, 104, 112, 103, 108), // the run's high
+      minute(2, 108, 109, 95, 97), // and its low
+      minute(3, 97, 101, 96, 100),
+      minute(4, 100, 102, 98, 101),
+    ];
+    const [bar] = aggregateBars(input, 5 * MIN, 10, T0 + 4 * MIN);
+    expect(bar.t).toBe(T0);
+    expect(bar.open).toBe(100); // first bar's open
+    expect(bar.high).toBe(112); // highest high anywhere in the run
+    expect(bar.low).toBe(95); // lowest low
+    expect(bar.close).toBe(101); // last bar's close
+  });
+
+  it('splits on bucket boundaries', () => {
+    const input = Array.from({ length: 12 }, (_, i) =>
+      minute(i, 100 + i, 101 + i, 99 + i, 100 + i),
+    );
+    const out = aggregateBars(input, 5 * MIN, 10, T0 + 11 * MIN);
+    expect(out.map((b) => b.t)).toEqual([T0, T0 + 5 * MIN, T0 + 10 * MIN]);
+    expect(out[0].open).toBe(100);
+    expect(out[0].close).toBe(104);
+    expect(out[1].open).toBe(105);
+  });
+
+  it('marks only the bucket holding now as live', () => {
+    const input = Array.from({ length: 12 }, (_, i) => minute(i, 100, 101, 99, 100));
+    const out = aggregateBars(input, 5 * MIN, 10, T0 + 11 * MIN);
+    expect(out.filter((b) => b.live)).toHaveLength(1);
+    expect(out[out.length - 1].live).toBe(true);
+  });
+
+  it('never loses an extreme from any minute it covers', () => {
+    let s = 99;
+    const input = Array.from({ length: 240 }, (_, i) => {
+      s = (s * 1103515245 + 12345) >>> 0;
+      const base = 100 + (s % 50);
+      return minute(i, base, base + 4, base - 4, base + 1);
+    });
+    const out = aggregateBars(input, 15 * MIN, 40, T0 + 239 * MIN);
+    for (const bar of out) {
+      const covered = input.filter(
+        (m) => Math.floor(m.t / (15 * MIN)) * (15 * MIN) === bar.t,
+      );
+      expect(bar.high).toBe(Math.max(...covered.map((m) => m.high)));
+      expect(bar.low).toBe(Math.min(...covered.map((m) => m.low)));
+      expect(bar.open).toBe(covered[0].open);
+      expect(bar.close).toBe(covered[covered.length - 1].close);
+    }
+  });
+
+  it('keeps at most the requested count and survives empty input', () => {
+    const input = Array.from({ length: 300 }, (_, i) => minute(i, 100, 101, 99, 100));
+    expect(aggregateBars(input, 5 * MIN, 6, T0 + 299 * MIN).length).toBeLessThanOrEqual(6);
+    expect(aggregateBars([], 5 * MIN, 10)).toEqual([]);
+    expect(aggregateBars(input, 0, 10)).toEqual([]);
   });
 });

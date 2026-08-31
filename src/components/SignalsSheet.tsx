@@ -1,7 +1,7 @@
 import { useMarket } from '../store/useMarket';
 import { Sheet } from './Sheet';
 import { SIGNAL_RULES, computeSignals } from '../engine/signals';
-import { toCandles } from '../engine/candles';
+import { aggregateBars } from '../engine/candles';
 import { fmtUsd } from '../lib/format';
 
 /** Rough character of the setting, so the number means something. */
@@ -14,7 +14,7 @@ function describeKey(key: number): string {
 
 export function SignalsSheet() {
   const store = useMarket(true);
-  const bars = toCandles(store.series, store.candleMs, 160);
+  const bars = aggregateBars(store.minuteBars, store.candleMs, 160);
   const study = computeSignals(bars, { ...SIGNAL_RULES, keyValue: store.signalKey });
   const { state } = study;
   const minutes = Math.round(store.candleMs / 60_000);

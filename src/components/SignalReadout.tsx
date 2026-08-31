@@ -1,6 +1,6 @@
 import { useMarket } from '../store/useMarket';
 import { SIGNAL_RULES, computeSignals } from '../engine/signals';
-import { toCandles } from '../engine/candles';
+import { aggregateBars } from '../engine/candles';
 import { fmtUsd } from '../lib/format';
 
 /**
@@ -12,7 +12,7 @@ export function SignalReadout() {
   const store = useMarket(true);
   if (!store.signalsOn || store.chartView !== 'candles') return null;
 
-  const bars = toCandles(store.series, store.candleMs, 160);
+  const bars = aggregateBars(store.minuteBars, store.candleMs, 160);
   const { state } = computeSignals(bars, {
     ...SIGNAL_RULES,
     keyValue: store.signalKey,
