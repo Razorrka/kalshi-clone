@@ -39,9 +39,9 @@ publishing `dist/`.
 Two things have to be true before the first deploy succeeds:
 
 1. **Pages is enabled**, at **Settings → Pages → Build and deployment →
-   Source: GitHub Actions**. The workflow asks `configure-pages` to turn this
-   on itself, but the Actions token is usually not allowed to create a Pages
-   site, so expect to flip it by hand once.
+   Source: GitHub Actions**. This is a one-time manual step: the Actions token
+   is not permitted to create a Pages site, so `configure-pages` cannot do it
+   for you regardless of the repository's visibility.
 2. **The repository is public**, unless the account is on a plan that permits
    Pages on private repositories. On a free account a private repo cannot
    publish a Pages site at all.
