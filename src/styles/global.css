@@ -81,6 +81,25 @@ input {
   overflow: hidden;
 }
 
+/* Installed to a home screen there is no browser around it, so the device
+   frame would be pretending to be a phone inside a phone. */
+@media (display-mode: standalone) {
+  .app {
+    padding: 0;
+    background: var(--bg);
+  }
+  .phone {
+    height: 100%;
+    max-width: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .home-bar {
+    display: none;
+  }
+}
+
 @media (min-width: 480px) and (min-height: 720px) {
   .app {
     background: radial-gradient(120% 90% at 50% 0%, #16181d 0%, #000 60%);
@@ -115,6 +134,11 @@ input {
   font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.2px;
+}
+
+.statusbar-spacer {
+  height: max(12px, env(safe-area-inset-top));
+  flex: none;
 }
 
 .statusbar .glyphs {

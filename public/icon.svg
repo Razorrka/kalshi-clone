@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="mint" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0%" stop-color="#12f0a8"/>
+      <stop offset="55%" stop-color="#00dd94"/>
+      <stop offset="100%" stop-color="#00b87b"/>
+    </linearGradient>
+    <clipPath id="square"><rect width="512" height="512"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#square)">
+    <rect width="512" height="512" fill="url(#mint)"/>
+
+    <!-- a faint tape running under the mark, the market this thing simulates -->
+    <path d="M-20 384 L54 350 L100 398 L146 306 L204 352 L258 252 L312 324 L366 214 L420 290 L478 188 L540 234"
+          fill="none" stroke="#04150e" stroke-opacity="0.13"
+          stroke-width="18" stroke-linejoin="round" stroke-linecap="round"/>
+
+    <!-- J: crossbar, stem, hook -->
+    <g fill="none" stroke="#05130d" stroke-width="60"
+       stroke-linecap="round" stroke-linejoin="round">
+      <path d="M214 112 L390 112"/>
+      <path d="M316 112 L316 300 C316 372 262 414 200 414 C150 414 114 384 101 340"/>
+    </g>
+
+    <!-- the live pip, in the app's chart orange -->
+    <circle cx="404" cy="378" r="31" fill="#ff9f19"/>
+  </g>
+</svg>

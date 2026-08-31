@@ -30,6 +30,27 @@ npm run preview    # serve the production build
 npm run typecheck  # tsc, no emit
 ```
 
+## Putting it on a phone home screen
+
+The repo deploys itself to GitHub Pages on every push to `main` or the feature
+branch (`.github/workflows/pages.yml`), building at `/kalshi-clone/` and
+publishing `dist/`.
+
+One-time setup in the repo: **Settings → Pages → Build and deployment →
+Source: GitHub Actions**. The repo also has to be public, unless the account
+has a plan that allows Pages on private repos.
+
+Once it is live, open the URL in Safari, tap **Share → Add to Home Screen**.
+It installs as a standalone app: no browser chrome, its own icon, and the
+device's real status bar in place of the simulated one the browser tab shows.
+
+Deploying somewhere other than a project path (a custom domain, or the root of
+a `user.github.io` repo) needs a different base:
+
+```bash
+VITE_BASE=/ npm run build
+```
+
 ## How the market works
 
 **Rounds** are pinned to the wall clock, so a 15-minute market always settles on
