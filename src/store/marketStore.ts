@@ -35,7 +35,7 @@ import { clearState, loadState, saveState } from './persist';
 
 /** ~5 Hz sampling keeps an hour of tape in a few thousand points. */
 const SAMPLE_MS = 200;
-const SERIES_WINDOW_MS = 65 * 60_000;
+const SERIES_WINDOW_MS = 185 * 60_000;
 const MAX_TAPE = 4;
 const MAX_HISTORY = 40;
 const STARTING_BALANCE_CENTS = 1_000_00;

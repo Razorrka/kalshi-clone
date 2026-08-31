@@ -50,7 +50,7 @@ export class LiveFeed {
     this.handlers.onStatus('idle');
   }
 
-  /** One minute candles for the last hour, so 15M/1H views have shape. */
+  /** One minute candles for the last few hours, so the wider views have shape. */
   private async seedHistory() {
     try {
       const res = await fetch(
@@ -62,7 +62,7 @@ export class LiveFeed {
       if (!Array.isArray(rows) || rows.length === 0) return;
       // [ time, low, high, open, close, volume ], newest first.
       const ticks = rows
-        .slice(0, 65)
+        .slice(0, 190)
         .map((r) => ({ t: r[0] * 1000, p: r[4] }))
         .filter((t) => Number.isFinite(t.t) && Number.isFinite(t.p))
         .sort((a, b) => a.t - b.t);

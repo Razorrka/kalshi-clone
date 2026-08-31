@@ -80,3 +80,84 @@ describe('toCandles', () => {
     expect(one[0]).toMatchObject({ open: 42, high: 42, low: 42, close: 42, live: true });
   });
 });
+
+describe('accuracy against a brute-force recomputation', () => {
+  /** Deterministic pseudo-random tape, so a failure can be replayed. */
+  function randomTape(seed: number, count: number, stepMs: number): Tick[] {
+    let s = seed >>> 0 || 1;
+    const rnd = () => {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+    let p = 78_000;
+    const out: Tick[] = [];
+    for (let i = 0; i < count; i++) {
+      p = Math.round((p * (1 + (rnd() - 0.5) * 0.002)) * 100) / 100;
+      out.push({ t: T0 + i * stepMs, p });
+    }
+    return out;
+  }
+
+  it('matches a bar-by-bar recomputation over many random tapes', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const stepMs = [200, 1_000, 5_000][seed % 3];
+      const bucketMs = [60_000, 5 * MIN, 15 * MIN][seed % 3];
+      const ticks = randomTape(seed, 1_500, stepMs);
+      const now = ticks[ticks.length - 1].t;
+      const bars = toCandles(ticks, bucketMs, 200, now);
+
+      for (const bar of bars) {
+        // Independently: every tick whose bucket is this bar's bucket.
+        const inBucket = ticks.filter(
+          (t) => Math.floor(t.t / bucketMs) * bucketMs === bar.t,
+        );
+        expect(inBucket.length).toBeGreaterThan(0);
+        const prices = inBucket.map((t) => t.p);
+        expect(bar.open).toBe(prices[0]);
+        expect(bar.close).toBe(prices[prices.length - 1]);
+        expect(bar.high).toBe(Math.max(...prices));
+        expect(bar.low).toBe(Math.min(...prices));
+      }
+    }
+  });
+
+  it('keeps the invariants every candle must satisfy', () => {
+    for (let seed = 100; seed < 120; seed++) {
+      const ticks = randomTape(seed, 900, 1_000);
+      const bars = toCandles(ticks, 5 * MIN, 50, ticks[ticks.length - 1].t);
+      for (const bar of bars) {
+        expect(bar.high).toBeGreaterThanOrEqual(bar.low);
+        expect(bar.high).toBeGreaterThanOrEqual(Math.max(bar.open, bar.close));
+        expect(bar.low).toBeLessThanOrEqual(Math.min(bar.open, bar.close));
+      }
+    }
+  });
+
+  it('accounts for every tick in the window, losing none', () => {
+    const ticks = randomTape(7, 1_200, 1_000);
+    const now = ticks[ticks.length - 1].t;
+    const bucketMs = 5 * MIN;
+    const bars = toCandles(ticks, bucketMs, 500, now);
+    const firstBucket = bars[0].t;
+    const expected = ticks.filter((t) => t.t >= firstBucket).length;
+    const counted = bars.reduce(
+      (n, bar) =>
+        n +
+        ticks.filter((t) => Math.floor(t.t / bucketMs) * bucketMs === bar.t).length,
+      0,
+    );
+    expect(counted).toBe(expected);
+  });
+
+  it('hands consecutive bars a continuous price, with no invented gaps', () => {
+    // Sampling is dense relative to the bucket, so each bar opens where the
+    // previous one closed; a jump would mean the aggregation dropped ticks.
+    const ticks = randomTape(3, 2_000, 200);
+    const bars = toCandles(ticks, 60_000, 100, ticks[ticks.length - 1].t);
+    for (let i = 1; i < bars.length; i++) {
+      const prevClose = bars[i - 1].close;
+      const open = bars[i].open;
+      expect(Math.abs(open - prevClose) / prevClose).toBeLessThan(0.005);
+    }
+  });
+});

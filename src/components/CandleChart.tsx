@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { market } from '../store/marketStore';
 import { toCandles } from '../engine/candles';
-import { fmtAxis } from '../lib/format';
+import { fmtAxis, fmtUsd } from '../lib/format';
 import { niceStep } from '../lib/math';
 
-const GUTTER = 86;
+const GUTTER = 94;
 const PAD_TOP = 34;
 const PAD_BOTTOM = 24;
 const SLOT = 17; // one candle plus its gap
@@ -82,8 +82,11 @@ export function CandleChart() {
       span = hi - lo;
 
       const yOf = (p: number) => plotBottom - ((p - lo) / span) * plotHeight;
-      // Newest bar sits at the right edge, older ones march left.
-      const xOf = (i: number) => plotRight - (bars.length - 1 - i) * SLOT - SLOT / 2;
+      // Bars are placed by their bucket's time, not their index, so a period
+      // with no data leaves a visible gap instead of silently closing up.
+      const newest = bars[bars.length - 1].t;
+      const xOf = (barT: number) =>
+        plotRight - ((newest - barT) / market.candleMs) * SLOT - SLOT / 2;
 
       // ---- target line -----------------------------------------------------
       const strikeY = yOf(strike);
@@ -101,23 +104,39 @@ export function CandleChart() {
       ctx.restore();
 
       // ---- price axis ------------------------------------------------------
-      const step = niceStep(span / 3.4);
-      ctx.font = '600 13px ' + getComputedStyle(document.body).fontFamily;
-      ctx.textAlign = 'right';
+      // Far denser than the line chart's: this view is for reading levels off
+      // the side, so it carries a rung roughly every 34px plus a live tag.
+      const rungs = Math.max(4, Math.min(9, Math.floor(plotHeight / 34)));
+      const step = niceStep(span / rungs);
+      const priceY = yOf(market.price);
+      const font = getComputedStyle(document.body).fontFamily;
+
+      ctx.font = '600 12px ' + font;
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#7b828c';
-      const first = Math.ceil((lo + pad * 0.4) / step) * step;
-      for (let v = first; v <= hi - pad * 0.3; v += step) {
+      const first = Math.ceil(lo / step) * step;
+      for (let v = first; v <= hi; v += step) {
         const y = yOf(v);
-        if (y < plotTop - 4 || y > plotBottom + 4) continue;
-        if (Math.abs(y - ty) < 12) continue;
-        ctx.fillText(fmtAxis(v, step), width - 12, y);
+        if (y < plotTop - 2 || y > plotBottom + 2) continue;
+        // Yield to the target line and to the live price tag.
+        if (Math.abs(y - ty) < 11) continue;
+        if (Math.abs(y - priceY) < 16) continue;
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(plotRight, y);
+        ctx.stroke();
+
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#7b828c';
+        ctx.fillText(fmtAxis(v, step), width - 10, y);
       }
 
       // ---- candles ---------------------------------------------------------
       for (let i = 0; i < bars.length; i++) {
         const b = bars[i];
-        const x = xOf(i);
+        const x = xOf(b.t);
         if (x < -SLOT) continue;
         const rising = b.close >= b.open;
         const colour = rising ? '#00dd94' : '#ff454d';
@@ -156,9 +175,41 @@ export function CandleChart() {
         ctx.globalAlpha = 1;
       }
 
+      // ---- live price tag --------------------------------------------------
+      {
+        const label = fmtUsd(market.price);
+        ctx.font = '800 11px ' + font;
+        const tw = ctx.measureText(label).width;
+        const tagH = 19;
+        const tagX = plotRight + 5;
+        const tagY = Math.max(plotTop + tagH / 2, Math.min(plotBottom - tagH / 2, priceY));
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,159,25,0.5)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        ctx.moveTo(0, priceY);
+        ctx.lineTo(tagX, priceY);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.fillStyle = '#ff9f19';
+        const r = 4;
+        const w = Math.min(tw + 12, width - tagX - 3);
+        ctx.beginPath();
+        ctx.roundRect(tagX, tagY - tagH / 2, w, tagH, r);
+        ctx.fill();
+
+        ctx.fillStyle = '#05130d';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, tagX + w / 2, tagY);
+      }
+
       // ---- interval label --------------------------------------------------
       const minutes = Math.round(market.candleMs / 60_000);
       ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
       ctx.font = '800 11px ' + getComputedStyle(document.body).fontFamily;
       ctx.fillStyle = '#6a707a';
       ctx.letterSpacing = '0.8px';
