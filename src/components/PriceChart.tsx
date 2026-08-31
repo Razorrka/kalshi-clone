@@ -3,11 +3,18 @@ import { market } from '../store/marketStore';
 import { TIMEFRAME_MS, type Tick } from '../engine/types';
 import { fmtAxis } from '../lib/format';
 import { niceStep } from '../lib/math';
+import { traceSmooth, type Point } from '../lib/curve';
 
 const GUTTER = 86; // right-hand strip reserved for the price axis
 const PAD_TOP = 34;
 const PAD_BOTTOM = 18;
 const LINE = '#ff9f19';
+/**
+ * Pixels between plotted points. One point per pixel drew every 200ms
+ * bid/ask wobble as a corner; spacing them out and curving between leaves a
+ * line that follows the move rather than the noise.
+ */
+const POINT_SPACING = 6;
 
 interface Bucket {
   x: number;
@@ -84,7 +91,7 @@ export function PriceChart() {
       const series = market.series;
       const startIdx = Math.max(0, lowerBound(series, tStart) - 1);
 
-      // ---- bucket the visible samples down to one column per pixel -------
+      // ---- reduce the visible samples to one point every few pixels ------
       const buckets: Bucket[] = [];
       let lo = Infinity;
       let hi = -Infinity;
@@ -98,7 +105,7 @@ export function PriceChart() {
           // Keep the straddling sample so the line reaches the left edge.
           if (i + 1 < series.length && series[i + 1].t < tStart) continue;
         }
-        const x = Math.round(xOf(s.t));
+        const x = Math.round(xOf(s.t) / POINT_SPACING) * POINT_SPACING;
         if (x !== cursor) {
           buckets.push({ x, min: s.p, max: s.p, last: s.p });
           cursor = x;
@@ -108,6 +115,8 @@ export function PriceChart() {
           if (s.p > b.max) b.max = s.p;
           b.last = s.p;
         }
+        // The y range still comes from every sample, so the frame never cuts
+        // off a high the reduced line happens to skip.
         if (s.p < lo) lo = s.p;
         if (s.p > hi) hi = s.p;
       }
@@ -234,13 +243,7 @@ export function PriceChart() {
       }
 
       // ---- the price line + gradient fill ---------------------------------
-      ctx.beginPath();
-      for (let i = 0; i < buckets.length; i++) {
-        const b = buckets[i];
-        const y = yOf(b.last);
-        if (i === 0) ctx.moveTo(b.x, y);
-        else ctx.lineTo(b.x, y);
-      }
+      const path: Point[] = buckets.map((b) => ({ x: b.x, y: yOf(b.last) }));
 
       const fill = ctx.createLinearGradient(0, plotTop, 0, plotBottom);
       fill.addColorStop(0, 'rgba(255,159,25,0.30)');
@@ -248,20 +251,17 @@ export function PriceChart() {
       fill.addColorStop(1, 'rgba(255,159,25,0)');
 
       ctx.save();
-      ctx.lineTo(buckets[buckets.length - 1].x, plotBottom + 40);
-      ctx.lineTo(buckets[0].x, plotBottom + 40);
+      ctx.beginPath();
+      traceSmooth(ctx, path);
+      ctx.lineTo(path[path.length - 1].x, plotBottom + 40);
+      ctx.lineTo(path[0].x, plotBottom + 40);
       ctx.closePath();
       ctx.fillStyle = fill;
       ctx.fill();
       ctx.restore();
 
       ctx.beginPath();
-      for (let i = 0; i < buckets.length; i++) {
-        const b = buckets[i];
-        const y = yOf(b.last);
-        if (i === 0) ctx.moveTo(b.x, y);
-        else ctx.lineTo(b.x, y);
-      }
+      traceSmooth(ctx, path);
       ctx.strokeStyle = LINE;
       ctx.lineWidth = 2.8;
       ctx.lineJoin = 'round';
