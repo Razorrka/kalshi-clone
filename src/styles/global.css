@@ -1735,3 +1735,77 @@ input {
   color: var(--muted);
   line-height: 1.5;
 }
+
+
+/* ---------------------------------------------------- signal readout */
+
+.signal-readout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 46px);
+  margin: 0 23px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid #1e232b;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  flex: none;
+}
+
+.signal-readout .dim {
+  color: var(--muted-2);
+  font-weight: 600;
+}
+
+.sig-chip {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  flex: none;
+}
+
+.sig-chip.long {
+  color: var(--up);
+  background: rgba(0, 221, 148, 0.14);
+}
+
+.sig-chip.short {
+  color: var(--down);
+  background: rgba(255, 69, 77, 0.14);
+}
+
+.sig-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.sig-more {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+}
+
+.slider-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-2);
+  margin-top: 2px;
+}

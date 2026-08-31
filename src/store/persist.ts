@@ -25,6 +25,7 @@ export interface PersistedState {
   simSeed: number;
   hapticsOn: boolean;
   signalsOn: boolean;
+  signalKey: number;
 }
 
 export function loadState(): Partial<PersistedState> | null {

@@ -18,6 +18,8 @@ import { ComboSheet } from './components/ComboSheet';
 import { SettingsSheet } from './components/SettingsSheet';
 import { ActivitySheet } from './components/ActivitySheet';
 import { StrikeSheet } from './components/StrikeSheet';
+import { SignalsSheet } from './components/SignalsSheet';
+import { SignalReadout } from './components/SignalReadout';
 import { ResultToast } from './components/ResultToast';
 
 export default function App() {
@@ -48,6 +50,7 @@ export default function App() {
             {store.chartView === 'positions' && <PositionsPanel />}
             <ResultToast />
           </div>
+          <SignalReadout />
           <ControlsRow />
           <TradeArea />
           <div className="home-bar" />
@@ -59,6 +62,7 @@ export default function App() {
         {store.sheet === 'settings' && <SettingsSheet />}
         {store.sheet === 'activity' && <ActivitySheet />}
         {store.sheet === 'strike' && <StrikeSheet />}
+        {store.sheet === 'signals' && <SignalsSheet />}
       </div>
     </div>
   );

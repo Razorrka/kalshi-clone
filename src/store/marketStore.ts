@@ -31,6 +31,7 @@ import type {
   Timeframe,
 } from '../engine/types';
 import { DEFAULT_CANDLE_MS } from '../engine/types';
+import { SIGNAL_RULES } from '../engine/signals';
 import { clearState, loadState, saveState } from './persist';
 
 /** ~5 Hz sampling keeps an hour of tape in a few thousand points. */
@@ -46,7 +47,8 @@ export type SheetName =
   | 'settings'
   | 'combo'
   | 'activity'
-  | 'strike';
+  | 'strike'
+  | 'signals';
 
 export interface Toast {
   id: number;
@@ -96,6 +98,8 @@ export class MarketStore {
   volPreset: VolPreset = 'normal';
   hapticsOn = true;
   signalsOn = true;
+  /** UT Bot "key value": how tightly the stop trails. Lower = more signals. */
+  signalKey = SIGNAL_RULES.keyValue;
   feedStatus: FeedStatus = 'idle';
   feedDetail = '';
 
@@ -156,6 +160,9 @@ export class MarketStore {
       if (Array.isArray(saved.history)) this.history = saved.history.slice(0, MAX_HISTORY);
       if (typeof saved.hapticsOn === 'boolean') this.hapticsOn = saved.hapticsOn;
       if (typeof saved.signalsOn === 'boolean') this.signalsOn = saved.signalsOn;
+      if (typeof saved.signalKey === 'number' && saved.signalKey > 0) {
+        this.signalKey = saved.signalKey;
+      }
     }
 
     this.annualVol = VOL_PRESETS[this.volPreset];
@@ -1087,6 +1094,13 @@ export class MarketStore {
     this.emitSlow();
   }
 
+  /** Clamped to the band where the indicator still behaves sensibly. */
+  setSignalKey(value: number) {
+    this.signalKey = Math.min(6, Math.max(0.3, Math.round(value * 10) / 10));
+    this.queueSave();
+    this.emitSlow();
+  }
+
   setSignals(on: boolean) {
     this.signalsOn = on;
     this.queueSave();
@@ -1257,6 +1271,7 @@ export class MarketStore {
         simSeed: 0,
         hapticsOn: this.hapticsOn,
         signalsOn: this.signalsOn,
+        signalKey: this.signalKey,
       });
     }, 250);
   }

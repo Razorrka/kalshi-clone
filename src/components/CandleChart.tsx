@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { market } from '../store/marketStore';
 import { toCandles } from '../engine/candles';
-import { computeSignals } from '../engine/signals';
+import { SIGNAL_RULES, computeSignals } from '../engine/signals';
 import { fmtAxis, fmtUsd } from '../lib/format';
 import { niceStep } from '../lib/math';
 
@@ -66,9 +66,10 @@ export function CandleChart() {
       // points. Signals are computed over a long window and then drawn only
       // where that window overlaps what is on screen.
       const signalBars = toCandles(market.series, market.candleMs, SIGNAL_LOOKBACK);
-      const study = market.signalsOn
-        ? computeSignals(signalBars)
-        : { signals: [], trail: [], dema: [] };
+      const study = computeSignals(signalBars, {
+        ...SIGNAL_RULES,
+        keyValue: market.signalKey,
+      });
 
       let lo = Infinity;
       let hi = -Infinity;
@@ -185,6 +186,36 @@ export function CandleChart() {
           ctx.restore();
         }
         ctx.globalAlpha = 1;
+      }
+
+      // ---- the trailing stop -------------------------------------------------
+      // The stop is the whole indicator: a signal is just price closing
+      // through it, so seeing where it sits tells you how close the next one
+      // is. Dotted, and coloured by which side price is currently on.
+      if (market.signalsOn && study.trail.length) {
+        const longSide = study.state.bias === 'long';
+        ctx.save();
+        ctx.setLineDash([2, 3]);
+        ctx.strokeStyle = longSide ? 'rgba(0,221,148,0.6)' : 'rgba(255,69,77,0.6)';
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        let drawing = false;
+        for (let i = 0; i < signalBars.length; i++) {
+          const v = study.trail[i];
+          if (v === null || v === undefined) {
+            drawing = false;
+            continue;
+          }
+          const x = xOf(signalBars[i].t);
+          const y = yOf(v);
+          if (drawing) ctx.lineTo(x, y);
+          else {
+            ctx.moveTo(x, y);
+            drawing = true;
+          }
+        }
+        ctx.stroke();
+        ctx.restore();
       }
 
       // ---- DEMA overlay ------------------------------------------------------

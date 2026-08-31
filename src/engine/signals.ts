@@ -31,12 +31,27 @@ export interface Signal {
   price: number;
 }
 
+export interface SignalState {
+  /** Which side of the trailing stop price is currently on. */
+  bias: 'long' | 'short' | null;
+  /** Where the stop sits right now. */
+  stop: number | null;
+  /** Distance from the last close to the stop, in price. */
+  distance: number | null;
+  /** The most recent confirmed signal, if any. */
+  last: Signal | null;
+  /** Bars since that signal. */
+  barsSince: number | null;
+}
+
 export interface SignalResult {
   signals: Signal[];
   /** The ATR trailing stop, aligned to the input candles. */
   trail: (number | null)[];
   /** The DEMA overlay, aligned to the input candles. */
   dema: (number | null)[];
+  /** A plain-language snapshot of where the indicator stands. */
+  state: SignalState;
 }
 
 /**
@@ -138,7 +153,14 @@ export function computeSignals(
   // A forming bar's close moves with every tick, so a marker on it would
   // appear and vanish as price wobbles. Only closed bars are considered.
   const closed = candles.filter((c) => !c.live);
-  const empty: SignalResult = { signals: [], trail: [], dema: [] };
+  const emptyState: SignalState = {
+    bias: null,
+    stop: null,
+    distance: null,
+    last: null,
+    barsSince: null,
+  };
+  const empty: SignalResult = { signals: [], trail: [], dema: [], state: emptyState };
   if (closed.length < minimumBars(config)) return empty;
 
   const src = closed.map((c) => c.close);
@@ -185,5 +207,21 @@ export function computeSignals(
     started = true;
   }
 
-  return { signals, trail, dema: demaLine };
+  const lastClose = src[src.length - 1];
+  const lastStop = trail[trail.length - 1];
+  const last = signals.length ? signals[signals.length - 1] : null;
+  const lastIndex = last ? closed.findIndex((c) => c.t === last.t) : -1;
+
+  return {
+    signals,
+    trail,
+    dema: demaLine,
+    state: {
+      bias: lastStop === null ? null : lastClose > lastStop ? 'long' : 'short',
+      stop: lastStop,
+      distance: lastStop === null ? null : lastClose - lastStop,
+      last,
+      barsSince: lastIndex >= 0 ? closed.length - 1 - lastIndex : null,
+    },
+  };
 }

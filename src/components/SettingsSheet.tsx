@@ -105,12 +105,9 @@ export function SettingsSheet() {
           <div className="grow">
             <div className="k">Buy / sell labels</div>
             <div className="d">
-              UT Bot Alerts ({SIGNAL_RULES.keyValue}, {SIGNAL_RULES.atrPeriod}) with a
-              DEMA {SIGNAL_RULES.demaPeriod} overlay, on the candle chart. The stop
-              trails price by {SIGNAL_RULES.keyValue}× ATR(
-              {SIGNAL_RULES.atrPeriod}) and only ever tightens; a label fires on the
-              bar where price closes through it. Only closed bars are marked — a
-              label on the bar still forming would appear and vanish as price moves.
+              UT Bot Alerts ({store.signalKey}, {SIGNAL_RULES.atrPeriod}) with a DEMA{' '}
+              {SIGNAL_RULES.demaPeriod} overlay, on the candle chart. Tap the reading
+              under the chart to change how aggressive it is and see what it means.
             </div>
           </div>
           <button

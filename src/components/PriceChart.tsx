@@ -4,6 +4,7 @@ import { TIMEFRAME_MS, type Tick } from '../engine/types';
 import { fmtAxis } from '../lib/format';
 import { niceStep } from '../lib/math';
 import { traceSmooth, type Point } from '../lib/curve';
+import { bucketWidthFor, sampleForPlot } from '../lib/plotSeries';
 
 const GUTTER = 86; // right-hand strip reserved for the price axis
 const PAD_TOP = 34;
@@ -15,13 +16,6 @@ const LINE = '#ff9f19';
  * line that follows the move rather than the noise.
  */
 const POINT_SPACING = 6;
-
-interface Bucket {
-  x: number;
-  min: number;
-  max: number;
-  last: number;
-}
 
 /** Index of the first sample at or after `t`. */
 function lowerBound(series: Tick[], t: number): number {
@@ -43,6 +37,9 @@ function lowerBound(series: Tick[], t: number): number {
 export function PriceChart() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const scaleRef = useRef<{ lo: number; hi: number } | null>(null);
+  const frameRef = useRef<{ lo: number; hi: number } | null>(null);
+  const lastWindowRef = useRef<number>(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -85,52 +82,35 @@ export function PriceChart() {
       if (plotRight <= 8 || plotHeight <= 8) return;
 
       const windowMs = TIMEFRAME_MS[market.timeframe];
+      if (windowMs !== lastWindowRef.current) {
+        lastWindowRef.current = windowMs;
+        frameRef.current = null;
+        scaleRef.current = null;
+      }
       const tEnd = now;
       const tStart = tEnd - windowMs;
 
       const series = market.series;
       const startIdx = Math.max(0, lowerBound(series, tStart) - 1);
 
-      // ---- reduce the visible samples to one point every few pixels ------
-      const buckets: Bucket[] = [];
-      let lo = Infinity;
-      let hi = -Infinity;
+      // ---- reduce the visible samples to a handful of plotted points -----
       const xOf = (t: number) => ((t - tStart) / windowMs) * plotRight;
+      const head = market.price;
 
-      // NaN so the first sample always opens a bucket, even at x === -1.
-      let cursor = Number.NaN;
+      const bucketMs = bucketWidthFor(windowMs, plotRight, POINT_SPACING, 200);
+      const plotted = sampleForPlot(series, tStart, tEnd, bucketMs, head);
+      if (plotted.length === 0) return;
+
+      // The vertical range comes from every sample, not just the plotted
+      // ones, so the frame can never crop a high the thinned line skips.
+      let lo = head;
+      let hi = head;
       for (let i = startIdx; i < series.length; i++) {
         const s = series[i];
-        if (s.t < tStart) {
-          // Keep the straddling sample so the line reaches the left edge.
-          if (i + 1 < series.length && series[i + 1].t < tStart) continue;
-        }
-        const x = Math.round(xOf(s.t) / POINT_SPACING) * POINT_SPACING;
-        if (x !== cursor) {
-          buckets.push({ x, min: s.p, max: s.p, last: s.p });
-          cursor = x;
-        } else {
-          const b = buckets[buckets.length - 1];
-          if (s.p < b.min) b.min = s.p;
-          if (s.p > b.max) b.max = s.p;
-          b.last = s.p;
-        }
-        // The y range still comes from every sample, so the frame never cuts
-        // off a high the reduced line happens to skip.
+        if (s.t < tStart) continue;
         if (s.p < lo) lo = s.p;
         if (s.p > hi) hi = s.p;
       }
-
-      // The head always sits exactly on the right edge, at the live price.
-      const head = market.price;
-      if (buckets.length === 0 || buckets[buckets.length - 1].x < plotRight) {
-        buckets.push({ x: plotRight, min: head, max: head, last: head });
-      } else {
-        buckets[buckets.length - 1].x = plotRight;
-        buckets[buckets.length - 1].last = head;
-      }
-      if (head < lo) lo = head;
-      if (head > hi) hi = head;
       if (!Number.isFinite(lo) || !Number.isFinite(hi)) return;
 
       // ---- y scale -------------------------------------------------------
@@ -147,9 +127,42 @@ export function PriceChart() {
       if (strike > hi && strike - hi < span * 0.28) hi = strike;
       if (strike < lo && lo - strike < span * 0.28) lo = strike;
       span = hi - lo;
+      const dataLo = lo;
+      const dataHi = hi;
       const pad = span * 0.16;
       lo -= pad;
       hi += pad;
+
+      // Re-scaling every frame moves the whole line vertically, which reads as
+      // history wriggling even though the points are fixed in time. So the
+      // frame is held still and only re-cut when the price genuinely needs
+      // room: when it approaches an edge, or has shrunk into so little of the
+      // frame that the detail is lost.
+      const frame = frameRef.current;
+      const needsRecut =
+        frame === null ||
+        dataLo < frame.lo + (frame.hi - frame.lo) * 0.06 ||
+        dataHi > frame.hi - (frame.hi - frame.lo) * 0.06 ||
+        (dataHi - dataLo) / (frame.hi - frame.lo) < 0.38;
+      if (needsRecut) frameRef.current = { lo, hi };
+      const target = frameRef.current!;
+
+      // Ease into a new frame so the re-cut glides; a jump this large is a
+      // timeframe switch, which should just snap.
+      const eased = scaleRef.current;
+      const far =
+        eased === null ||
+        Math.abs(eased.lo - target.lo) > (target.hi - target.lo) * 0.6 ||
+        Math.abs(eased.hi - target.hi) > (target.hi - target.lo) * 0.6;
+      scaleRef.current = far
+        ? { ...target }
+        : {
+            lo: eased.lo + (target.lo - eased.lo) * 0.12,
+            hi: eased.hi + (target.hi - eased.hi) * 0.12,
+          };
+
+      lo = scaleRef.current.lo;
+      hi = scaleRef.current.hi;
       span = hi - lo;
 
       const yOf = (p: number) => plotBottom - ((p - lo) / span) * plotHeight;
@@ -243,7 +256,7 @@ export function PriceChart() {
       }
 
       // ---- the price line + gradient fill ---------------------------------
-      const path: Point[] = buckets.map((b) => ({ x: b.x, y: yOf(b.last) }));
+      const path: Point[] = plotted.map((pt) => ({ x: xOf(pt.t), y: yOf(pt.p) }));
 
       const fill = ctx.createLinearGradient(0, plotTop, 0, plotBottom);
       fill.addColorStop(0, 'rgba(255,159,25,0.30)');
@@ -269,8 +282,8 @@ export function PriceChart() {
       ctx.stroke();
 
       // ---- head ------------------------------------------------------------
-      const hx = plotRight;
-      const hy = yOf(head);
+      const hx = path[path.length - 1].x;
+      const hy = path[path.length - 1].y;
       const phase = (anim % 1800) / 1800;
       ctx.save();
       ctx.globalAlpha = 0.32 * (1 - phase);
