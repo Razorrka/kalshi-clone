@@ -48,7 +48,8 @@ export type SheetName =
   | 'combo'
   | 'activity'
   | 'strike'
-  | 'signals';
+  | 'signals'
+  | 'balance';
 
 export interface Toast {
   id: number;
@@ -105,6 +106,8 @@ export class MarketStore {
 
   // ---- account -----------------------------------------------------------
   balanceCents = STARTING_BALANCE_CENTS;
+  /** What a reset goes back to. Follows whatever balance you last set. */
+  startingBalanceCents = STARTING_BALANCE_CENTS;
   positions: Position[] = [];
   limitOrders: LimitOrder[] = [];
   combos: ComboTicket[] = [];
@@ -156,6 +159,12 @@ export class MarketStore {
       }
       if (typeof saved.balanceCents === 'number') {
         this.balanceCents = Math.max(0, Math.round(saved.balanceCents));
+      }
+      if (typeof saved.startingBalanceCents === 'number') {
+        this.startingBalanceCents = Math.max(
+          0,
+          Math.round(saved.startingBalanceCents),
+        );
       }
       if (Array.isArray(saved.history)) this.history = saved.history.slice(0, MAX_HISTORY);
       if (typeof saved.hapticsOn === 'boolean') this.hapticsOn = saved.hapticsOn;
@@ -1150,8 +1159,56 @@ export class MarketStore {
     this.emitSlow();
   }
 
+  /** The largest practice balance worth allowing; past this the numbers stop
+   * meaning anything and the formatting starts to break. */
+  private static readonly MAX_BALANCE_CENTS = 100_000_000_00;
+
+  /**
+   * Sets the balance outright. Open tickets are left alone: they were priced
+   * against a target and a quote, neither of which the balance touches.
+   */
+  setBalance(dollars: number): { ok: boolean; error?: string } {
+    if (!Number.isFinite(dollars) || dollars < 0) {
+      return { ok: false, error: 'Enter an amount of zero or more' };
+    }
+    const cents = Math.min(
+      MarketStore.MAX_BALANCE_CENTS,
+      Math.round(dollars * 100),
+    );
+    this.balanceCents = cents;
+    // A reset should return you to the stake you chose, not to mine.
+    this.startingBalanceCents = cents;
+    this.queueSave();
+    this.showToast({
+      kind: 'info',
+      title: 'Balance set',
+      detail: `Practice balance is now $${(cents / 100).toFixed(2)}`,
+    });
+    this.emitSlow();
+    return { ok: true };
+  }
+
+  /** Tops the balance up without changing what a reset returns to. */
+  addFunds(dollars: number): { ok: boolean; error?: string } {
+    if (!Number.isFinite(dollars) || dollars <= 0) {
+      return { ok: false, error: 'Enter an amount above zero' };
+    }
+    this.balanceCents = Math.min(
+      MarketStore.MAX_BALANCE_CENTS,
+      this.balanceCents + Math.round(dollars * 100),
+    );
+    this.queueSave();
+    this.showToast({
+      kind: 'info',
+      title: 'Funds added',
+      detail: `+$${dollars.toFixed(2)} · balance $${(this.balanceCents / 100).toFixed(2)}`,
+    });
+    this.emitSlow();
+    return { ok: true };
+  }
+
   resetAccount() {
-    this.balanceCents = STARTING_BALANCE_CENTS;
+    this.balanceCents = this.startingBalanceCents;
     this.positions = [];
     this.limitOrders = [];
     this.combos = [];
@@ -1164,7 +1221,7 @@ export class MarketStore {
     this.showToast({
       kind: 'info',
       title: 'Practice account reset',
-      detail: 'Balance back to $1,000',
+      detail: `Balance back to $${(this.startingBalanceCents / 100).toFixed(2)}`,
     });
     this.emitSlow();
   }
@@ -1263,6 +1320,7 @@ export class MarketStore {
         strikeMode: this.strikeMode,
         manualStrike: this.manualStrike,
         balanceCents: this.balanceCents,
+        startingBalanceCents: this.startingBalanceCents,
         history: this.history,
         positions: this.positions.filter((p) => p.status === 'open'),
         limitOrders: this.limitOrders.filter((o) => o.status === 'resting'),

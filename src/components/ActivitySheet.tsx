@@ -31,6 +31,15 @@ export function ActivitySheet() {
       }
       onClose={() => store.closeSheet()}
     >
+      <button
+        className="balance-row"
+        onClick={() => store.openSheet('balance')}
+      >
+        <span className="k">Practice balance</span>
+        <span className="v tnum">{fmtMoney(store.balance)}</span>
+        <span className="go">Change</span>
+      </button>
+
       {(open.length > 0 || openCombos.length > 0) && (
         <>
           <div className="book-head" style={{ paddingTop: 4 }}>

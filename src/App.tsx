@@ -19,6 +19,7 @@ import { SettingsSheet } from './components/SettingsSheet';
 import { ActivitySheet } from './components/ActivitySheet';
 import { StrikeSheet } from './components/StrikeSheet';
 import { SignalsSheet } from './components/SignalsSheet';
+import { BalanceSheet } from './components/BalanceSheet';
 import { SignalReadout } from './components/SignalReadout';
 import { ResultToast } from './components/ResultToast';
 
@@ -63,6 +64,7 @@ export default function App() {
         {store.sheet === 'activity' && <ActivitySheet />}
         {store.sheet === 'strike' && <StrikeSheet />}
         {store.sheet === 'signals' && <SignalsSheet />}
+        {store.sheet === 'balance' && <BalanceSheet />}
       </div>
     </div>
   );

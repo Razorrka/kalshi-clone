@@ -627,3 +627,87 @@ describe('setting the target by hand', () => {
     expect(store.manualStrike).toBe(0);
   });
 });
+
+describe('choosing your own practice balance', () => {
+  beforeEach(() => {
+    store = newStore();
+  });
+
+  it('sets the balance outright', () => {
+    expect(store.setBalance(250).ok).toBe(true);
+    expect(store.balanceCents).toBe(25_000);
+    expect(store.balance).toBe(250);
+  });
+
+  it('makes a reset return to the stake you chose, not the default', () => {
+    store.setBalance(200);
+    store.placeBet('up', 50);
+    expect(store.balanceCents).toBe(15_000);
+
+    store.resetAccount();
+
+    expect(store.balanceCents).toBe(20_000);
+    expect(store.startingBalanceCents).toBe(20_000);
+  });
+
+  it('tops up without moving what a reset returns to', () => {
+    store.setBalance(100);
+    expect(store.addFunds(25).ok).toBe(true);
+    expect(store.balanceCents).toBe(12_500);
+    // The reset target stays where it was set.
+    expect(store.startingBalanceCents).toBe(10_000);
+    store.resetAccount();
+    expect(store.balanceCents).toBe(10_000);
+  });
+
+  it('allows zero, so you can practise being broke', () => {
+    expect(store.setBalance(0).ok).toBe(true);
+    expect(store.balanceCents).toBe(0);
+    expect(store.placeBet('up', 1).ok).toBe(false);
+  });
+
+  it('rejects a negative balance and a non-positive top-up', () => {
+    expect(store.setBalance(-5).ok).toBe(false);
+    expect(store.setBalance(Number.NaN).ok).toBe(false);
+    expect(store.addFunds(0).ok).toBe(false);
+    expect(store.addFunds(-10).ok).toBe(false);
+    expect(store.balanceCents).toBe(100_000);
+  });
+
+  it('keeps the balance in whole cents', () => {
+    store.setBalance(33.335);
+    expect(Number.isInteger(store.balanceCents)).toBe(true);
+    store.addFunds(0.005);
+    expect(Number.isInteger(store.balanceCents)).toBe(true);
+  });
+
+  it('leaves open picks alone, since the balance does not price them', () => {
+    store.placeBet('up', 40);
+    const pos = store.openPositions[0];
+
+    store.setBalance(5_000);
+
+    expect(store.openPositions).toHaveLength(1);
+    expect(store.openPositions[0].multiplier).toBe(pos.multiplier);
+    expect(store.openPositions[0].stake).toBe(40);
+  });
+
+  it('still settles a winning pick after the balance was changed', () => {
+    store.placeBet('up', 25);
+    store.placeBet('down', 25);
+    store.setBalance(500);
+
+    run(MINUTE);
+
+    const won = store.positions.find((p) => p.status === 'won')!;
+    const credit = Math.round(won.stake * won.multiplier * 100);
+    expect(store.balanceCents).toBe(50_000 + credit);
+  });
+
+  it('caps absurd amounts rather than overflowing the display', () => {
+    store.setBalance(1e12);
+    expect(store.balanceCents).toBe(100_000_000_00);
+    store.addFunds(1e12);
+    expect(store.balanceCents).toBe(100_000_000_00);
+  });
+});

@@ -144,11 +144,22 @@ export function SettingsSheet() {
         <div className="setting-head">
           <div className="grow">
             <div className="k">Practice account</div>
-            <div className="d tnum">Balance {fmtMoney(store.balance)}</div>
+            <div className="d">
+              Balance <span className="tnum">{fmtMoney(store.balance)}</span>. Pick a
+              stake small enough that losing it registers — that is most of what
+              makes practice worth anything.
+            </div>
           </div>
         </div>
+        <button
+          className="danger-btn"
+          style={{ borderColor: '#2c323b', color: '#fff' }}
+          onClick={() => store.openSheet('balance')}
+        >
+          Set or add funds
+        </button>
         <button className="danger-btn" onClick={() => store.resetAccount()}>
-          Reset to $1,000
+          Reset to {fmtMoney(store.startingBalanceCents / 100)}
         </button>
       </div>
 

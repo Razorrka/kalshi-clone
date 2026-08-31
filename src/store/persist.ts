@@ -17,6 +17,7 @@ export interface PersistedState {
   strikeMode: StrikeMode;
   manualStrike: number;
   balanceCents: number;
+  startingBalanceCents: number;
   history: RoundResult[];
   positions: Position[];
   limitOrders: LimitOrder[];

@@ -1809,3 +1809,38 @@ input {
   color: var(--muted-2);
   margin-top: 2px;
 }
+
+
+/* --------------------------------------------------- balance shortcut */
+
+.balance-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  margin-top: 4px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid #1e232b;
+  text-align: left;
+}
+
+.balance-row .k {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.balance-row .v {
+  font-size: 17px;
+  font-weight: 800;
+  margin-left: auto;
+}
+
+.balance-row .go {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--accent);
+  flex: none;
+}
