@@ -913,3 +913,159 @@ describe('a call you did not get around to grading', () => {
     expect(store.callModel.trained).toBe(0);
   });
 });
+
+describe('moving the target under a running call', () => {
+  const LOCK_AT = 16_200;
+
+  beforeEach(() => {
+    store = newStore();
+  });
+
+  it('throws away the call that was about the old number', () => {
+    run(LOCK_AT + 500);
+    const call = store.currentCall!;
+    expect(call).not.toBeNull();
+
+    store.setManualStrike(store.price + 40);
+    // Not flipped — discarded. It answered a question that no longer exists.
+    expect(store.currentCall).toBeNull();
+    expect(store.calls.some((c) => c.id === call.id)).toBe(false);
+    expect(store.callRecord.graded).toBe(0);
+  });
+
+  it('leaves already-settled calls on file, since their round really ran', () => {
+    run(LOCK_AT + 500);
+    const first = store.currentCall!.id;
+    run(MINUTE);
+    expect(store.gradableCalls.map((c) => c.id)).toContain(first);
+
+    store.setManualStrike(store.price + 40);
+    // Only the live round's call is discarded; a finished one is still yours
+    // to grade, because it was answered against the target it named.
+    expect(store.gradableCalls.map((c) => c.id)).toContain(first);
+  });
+
+  it('re-arms when the price source changes underneath it', () => {
+    run(LOCK_AT + 500);
+    expect(store.currentCall).not.toBeNull();
+
+    store.setMode('live');
+    expect(store.currentCall).toBeNull();
+    expect(store.callRearmed).toBe(true);
+    store.setMode('sim');
+  });
+});
+
+describe('re-arming the call on the fifteen-minute market', () => {
+  const ROUND = 15 * MINUTE;
+  const LOCK_AT = 4 * MINUTE;
+
+  beforeEach(() => {
+    vi.setSystemTime(T0 + 1_000);
+    store = new MarketStore();
+    store.setRoundMs(ROUND);
+    store.start();
+  });
+
+  it('watches the new number for a minute before committing again', () => {
+    run(LOCK_AT + 1_000);
+    expect(store.currentCall).not.toBeNull();
+
+    store.setManualStrike(store.price + 120);
+    expect(store.callRearmed).toBe(true);
+    expect(store.msToCall).toBeGreaterThan(55_000);
+    expect(store.msToCall).toBeLessThanOrEqual(60_000);
+
+    run(50_000);
+    expect(store.currentCall).toBeNull();
+
+    run(11_000);
+    const fresh = store.currentCall;
+    expect(fresh).not.toBeNull();
+    // And it is a call about the number that is live now.
+    expect(fresh!.strike).toBe(store.round.strike);
+    expect(fresh!.strike).toBe(store.manualStrike);
+  });
+
+  it('does not bring the call forward when the target moves early', () => {
+    run(30_000);
+    store.setManualStrike(store.price + 120);
+
+    // A minute from the change is still short of the four-minute mark, so
+    // the four-minute mark stands rather than calling at 1:30.
+    run(70_000);
+    expect(store.currentCall).toBeNull();
+
+    run(LOCK_AT - 100_000 + 2_000);
+    expect(store.currentCall).not.toBeNull();
+  });
+
+  it('re-arms when the target is handed back to the round open', () => {
+    store.setManualStrike(store.price + 120);
+    run(LOCK_AT + 1_000);
+    expect(store.currentCall).not.toBeNull();
+
+    store.clearManualStrike();
+    expect(store.currentCall).toBeNull();
+    expect(store.callRearmed).toBe(true);
+    expect(store.callWaitMs).toBe(60_000);
+  });
+
+  it('says nothing at all when the change lands too late to watch', () => {
+    run(12 * MINUTE);
+    store.setManualStrike(store.price + 120);
+
+    // Past the deadline: a minute of watching would run into the bell.
+    expect(store.callWindowClosed).toBe(true);
+    run(2 * MINUTE);
+    expect(store.currentCall).toBeNull();
+  });
+
+  it('goes back to the usual mark on the next round', () => {
+    run(6 * MINUTE);
+    store.setManualStrike(store.price + 120);
+    expect(store.callRearmed).toBe(true);
+
+    run(10 * MINUTE);
+    // New round, so the change belongs to the round before it.
+    expect(store.callRearmed).toBe(false);
+    expect(store.callWaitMs).toBe(4 * MINUTE);
+  });
+});
+
+describe('what you are told when the target moves', () => {
+  const ROUND = 15 * MINUTE;
+
+  beforeEach(() => {
+    vi.setSystemTime(T0 + 1_000);
+    store = new MarketStore();
+    store.setRoundMs(ROUND);
+    store.start();
+  });
+
+  it('replaces the "call locked" message instead of leaving it standing', () => {
+    run(4 * MINUTE + 1_000);
+    expect(store.currentCall).not.toBeNull();
+    expect(store.toast?.title).toContain('Call locked');
+
+    store.setManualStrike(store.price + 120);
+    // The old message announced an answer that no longer exists.
+    expect(store.toast?.title).not.toContain('Call locked');
+    expect(store.toast?.title).toBe('Call cleared');
+  });
+
+  it('lets the refund speak first when money is involved too', () => {
+    run(4 * MINUTE + 1_000);
+    expect(store.placeBet('up', 25).ok).toBe(true);
+
+    store.setManualStrike(store.price + 120);
+    expect(store.toast?.title).toContain('refund');
+  });
+
+  it('says nothing extra when there was no call to clear', () => {
+    run(30_000);
+    expect(store.currentCall).toBeNull();
+    store.setManualStrike(store.price + 120);
+    expect(store.toast?.title).not.toBe('Call cleared');
+  });
+});

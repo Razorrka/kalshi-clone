@@ -37,11 +37,13 @@ import { aggregateBars } from '../engine/candles';
 import {
   INITIAL_MODEL,
   callDeadlineFor,
+  callOpensAt,
   callStats,
   learn,
   lockDelayFor,
   makeCall,
   outcomeFromGrade,
+  rearmDelayFor,
   standardisedGap,
   type CallFeatures,
   type CallGrade,
@@ -149,6 +151,11 @@ export class MarketStore {
   calls: LockedCall[] = [];
   /** What it has learned from the ones that were graded. */
   callModel: CallModel = INITIAL_MODEL;
+  /**
+   * When the target last moved under the caller. Only meaningful inside the
+   * round it happened in, so it needs no resetting on rollover.
+   */
+  targetChangedAt = 0;
 
   // ---- ui ----------------------------------------------------------------
   timeframe: Timeframe = 'live';
@@ -1132,6 +1139,7 @@ export class MarketStore {
 
   setMode(mode: FeedMode) {
     if (mode === this.mode) return;
+    this.rearmCall(Date.now());
     this.refundOpenTickets('the price source changed');
     this.mode = mode;
     this.livePrice = 0;
@@ -1179,6 +1187,7 @@ export class MarketStore {
     if (strike === this.round.strike && this.strikeMode === 'manual') {
       return { ok: true };
     }
+    this.rearmCall(Date.now());
     this.refundOpenTickets('the target changed');
     this.strikeMode = 'manual';
     this.manualStrike = strike;
@@ -1192,6 +1201,7 @@ export class MarketStore {
   /** Hands the target back to the price at the round's open. */
   clearManualStrike() {
     if (this.strikeMode === 'auto') return;
+    this.rearmCall(Date.now());
     this.refundOpenTickets('the target changed');
     this.strikeMode = 'auto';
     this.manualStrike = 0;
@@ -1206,6 +1216,7 @@ export class MarketStore {
   setRoundMs(roundMs: number) {
     if (roundMs === this.roundMs) return;
     this.refundOpenTickets('the round length changed');
+    this.dropLiveCall();
     this.roundMs = roundMs;
     const now = Date.now();
     const bounds = roundBounds(now, roundMs);
@@ -1468,10 +1479,56 @@ export class MarketStore {
     return this.calls.filter((c) => c.outcome !== undefined && !c.grade);
   }
 
+  /** When this round's call may be made, allowing for a moved target. */
+  private get callOpensAt(): number {
+    return callOpensAt(this.round.startsAt, this.roundMs, this.targetChangedAt);
+  }
+
   /** Milliseconds until this round's call commits. Zero once it has. */
   get msToCall(): number {
     if (this.currentCall) return 0;
-    return Math.max(0, this.round.startsAt + lockDelayFor(this.roundMs) - Date.now());
+    return Math.max(0, this.callOpensAt - Date.now());
+  }
+
+  /** True while the caller is watching a target you changed mid-round. */
+  get callRearmed(): boolean {
+    return !this.currentCall && this.targetChangedAt > this.round.startsAt;
+  }
+
+  /** The window the countdown is running against, for a progress bar. */
+  get callWaitMs(): number {
+    return this.callRearmed ? rearmDelayFor(this.roundMs) : lockDelayFor(this.roundMs);
+  }
+
+  /**
+   * Sends the call clock back to zero because the target moved.
+   *
+   * A call is an answer to "does it finish above this number", so a new number
+   * is a new question — the old answer is not flipped, it is discarded along
+   * with the tickets bought against the same target.
+   */
+  private rearmCall(now: number) {
+    this.targetChangedAt = now;
+    const had = this.currentCall !== null;
+    this.dropLiveCall();
+    // Otherwise the "Call locked" toast sits there contradicting the strip,
+    // still announcing an answer that has just been thrown away.
+    if (had) {
+      this.showToast({
+        kind: 'info',
+        title: 'Call cleared',
+        detail: 'The target moved, so it will look at the new one first',
+      });
+    }
+  }
+
+  /**
+   * Forgets the call on the round now running. Used where the round itself is
+   * being replaced, which restarts the clock on its own and so needs no
+   * re-arm — only the orphaned call cleared out.
+   */
+  private dropLiveCall() {
+    this.calls = this.calls.filter((c) => c.roundId !== this.round.id);
   }
 
   /** True when this round went past the point where a call was still useful. */
@@ -1512,7 +1569,7 @@ export class MarketStore {
    */
   private maybeLockCall(now: number): boolean {
     if (this.currentCall) return false;
-    if (now < this.round.startsAt + lockDelayFor(this.roundMs)) return false;
+    if (now < this.callOpensAt) return false;
     // Opened too late in the round to say anything worth grading.
     if (now > this.round.startsAt + callDeadlineFor(this.roundMs)) return false;
     // In live mode the price is still the simulator's until the first real

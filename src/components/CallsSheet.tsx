@@ -240,6 +240,16 @@ export function CallsSheet() {
         nothing to be graded on.
       </div>
       <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>Change the target and the clock restarts.</strong>{' '}
+        A call answers "does it finish above this number", so a different number
+        is a different question — the live call is dropped rather than reworded,
+        and the caller watches price around the new target for a minute before
+        it commits again. It never calls sooner than it would have: an edit made
+        early in the round still waits for the usual mark. Edit late enough that
+        a minute of watching would run into the bell and it says nothing at all
+        that round.
+      </div>
+      <div className="note">
         <strong style={{ color: 'var(--muted)' }}>Where the confidence comes from.</strong>{' '}
         Untrained, it reproduces the textbook answer — the probability of
         finishing above the target given how far away it is and how much time is

@@ -138,6 +138,39 @@ export function callDeadlineFor(roundMs: number): number {
   return roundMs - lockDelayFor(roundMs);
 }
 
+/**
+ * How long the caller watches a freshly-set target before committing.
+ *
+ * Changing the strike changes the question, so the clock goes back to zero —
+ * but only for about a minute rather than the full opening wait, since the
+ * price history it reads is already there and it is the new target it needs
+ * to see price behave around.
+ */
+export const STRIKE_REARM_MS = 60_000;
+
+/**
+ * The re-arm window for a given round length. Never longer than the round's
+ * own opening wait, so a short round cannot be left with no call at all.
+ */
+export function rearmDelayFor(roundMs: number): number {
+  return Math.min(STRIKE_REARM_MS, lockDelayFor(roundMs));
+}
+
+/**
+ * When this round's call may be made, given the round's open and the last
+ * time the target was changed. A change never brings the call forward, only
+ * pushes it back: an early edit still waits for the usual mark.
+ */
+export function callOpensAt(
+  roundStartsAt: number,
+  roundMs: number,
+  targetChangedAt: number,
+): number {
+  const usual = roundStartsAt + lockDelayFor(roundMs);
+  if (!(targetChangedAt > roundStartsAt)) return usual;
+  return Math.max(usual, targetChangedAt + rearmDelayFor(roundMs));
+}
+
 export type CallGrade = 'right' | 'wrong';
 
 /**

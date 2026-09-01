@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   INITIAL_MODEL,
   callDeadlineFor,
+  callOpensAt,
   callStats,
   contributions,
   learn,
@@ -9,6 +10,7 @@ import {
   makeCall,
   outcomeFromGrade,
   predictUp,
+  rearmDelayFor,
   sigmoid,
   standardisedGap,
   type LockedCall,
@@ -376,5 +378,51 @@ describe('whether the confidence means anything', () => {
     // And it did claim across the whole range, not just hedge at 50%.
     expect(bands.has(9)).toBe(true);
     expect(bands.has(5)).toBe(true);
+  });
+});
+
+describe('changing the target mid-round', () => {
+  const ROUND = 15 * 60_000;
+  const T = 1_000_000;
+
+  it('leaves the usual mark alone when the target has not moved', () => {
+    expect(callOpensAt(T, ROUND, 0)).toBe(T + 4 * 60_000);
+    // A change stamped before this round opened belongs to an earlier one.
+    expect(callOpensAt(T, ROUND, T - 5_000)).toBe(T + 4 * 60_000);
+  });
+
+  it('gives a new target a minute of watching before it commits', () => {
+    // Changed eight minutes in: the call waits a minute from the change.
+    expect(callOpensAt(T, ROUND, T + 8 * 60_000)).toBe(T + 9 * 60_000);
+  });
+
+  it('never brings the call forward, only pushes it back', () => {
+    // Changed thirty seconds in, the usual four-minute mark still stands.
+    expect(callOpensAt(T, ROUND, T + 30_000)).toBe(T + 4 * 60_000);
+    for (const at of [1_000, 60_000, 120_000, 179_000]) {
+      expect(callOpensAt(T, ROUND, T + at)).toBe(T + 4 * 60_000);
+    }
+  });
+
+  it('can push past the deadline, which is what stops a rushed call', () => {
+    const late = T + 13 * 60_000;
+    expect(callOpensAt(T, ROUND, late)).toBeGreaterThan(T + callDeadlineFor(ROUND));
+  });
+});
+
+describe('how long a moved target is watched', () => {
+  it('is the minute asked for on the fifteen-minute market', () => {
+    expect(rearmDelayFor(15 * 60_000)).toBe(60_000);
+    expect(rearmDelayFor(5 * 60_000)).toBe(60_000);
+  });
+
+  it('never outlasts the round it is in', () => {
+    for (const roundMs of [60_000, 3 * 60_000, 15 * 60_000, 60 * 60_000]) {
+      const rearm = rearmDelayFor(roundMs);
+      expect(rearm).toBeLessThanOrEqual(lockDelayFor(roundMs));
+      // Change the target the instant the round opens and a call is still
+      // reachable before the deadline.
+      expect(rearm).toBeLessThan(callDeadlineFor(roundMs));
+    }
   });
 });

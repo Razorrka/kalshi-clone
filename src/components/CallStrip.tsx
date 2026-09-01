@@ -1,6 +1,5 @@
 import { useMarket } from '../store/useMarket';
 import { fmtClock, fmtUsd } from '../lib/format';
-import { lockDelayFor } from '../engine/caller';
 import { Check, Cross } from './icons';
 
 /**
@@ -67,14 +66,19 @@ export function CallStrip() {
 
   if (!call) {
     const wait = store.msToCall;
-    const total = lockDelayFor(store.roundMs);
+    const total = store.callWaitMs;
     const done = total > 0 ? 1 - wait / total : 1;
     return (
       <button className="call-strip waiting" onClick={() => store.openSheet('calls')}>
         <span className="call-badge pending">···</span>
         <span className="call-text">
-          Call locks in <span className="tnum">{fmtClock(wait)}</span>
-          <span className="dim"> · one answer, then no take-backs</span>
+          {store.callRearmed ? 'New target · call locks in ' : 'Call locks in '}
+          <span className="tnum">{fmtClock(wait)}</span>
+          {/* The re-arm line is longer, so it goes without the tail rather
+              than ellipsing away the countdown's explanation. */}
+          {!store.callRearmed && (
+            <span className="dim"> · one answer, then no take-backs</span>
+          )}
         </span>
         <span className="call-progress">
           <span style={{ width: `${Math.max(0, Math.min(1, done)) * 100}%` }} />
