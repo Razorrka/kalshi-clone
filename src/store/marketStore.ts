@@ -36,9 +36,11 @@ import { SIGNAL_RULES, computeSignals } from '../engine/signals';
 import { aggregateBars } from '../engine/candles';
 import {
   INITIAL_MODEL,
+  CALL_ON_DEMAND_MS,
   callDeadlineFor,
   callOpensAt,
   callStats,
+  canRequestCallAt,
   learn,
   lockDelayFor,
   makeCall,
@@ -156,6 +158,8 @@ export class MarketStore {
    * round it happened in, so it needs no resetting on rollover.
    */
   targetChangedAt = 0;
+  /** When a call was last asked for outright. Same round-scoped lifetime. */
+  callRequestedAt = 0;
 
   // ---- ui ----------------------------------------------------------------
   timeframe: Timeframe = 'live';
@@ -1481,7 +1485,53 @@ export class MarketStore {
 
   /** When this round's call may be made, allowing for a moved target. */
   private get callOpensAt(): number {
-    return callOpensAt(this.round.startsAt, this.roundMs, this.targetChangedAt);
+    return callOpensAt(
+      this.round.startsAt,
+      this.roundMs,
+      this.targetChangedAt,
+      this.callRequestedAt,
+    );
+  }
+
+  /** True while a call you asked for outright is counting down. */
+  get callOnDemand(): boolean {
+    if (this.currentCall) return false;
+    return (
+      this.callRequestedAt > this.round.startsAt &&
+      this.callRequestedAt >= this.targetChangedAt
+    );
+  }
+
+  /** Whether asking for a call right now would leave time to make one. */
+  get canRequestCall(): boolean {
+    return canRequestCallAt(this.round.startsAt, this.roundMs, Date.now());
+  }
+
+  /**
+   * Asks for a call ninety seconds from now, throwing away whatever it had
+   * already committed to this round.
+   *
+   * This is the one door out of "locked and left alone", and it is deliberate:
+   * you opened it. Re-rolled calls still go in the record, so pressing until
+   * you like the answer will show up in the calibration rather than hiding.
+   */
+  requestCall(): { ok: boolean; error?: string } {
+    const now = Date.now();
+    if (!canRequestCallAt(this.round.startsAt, this.roundMs, now)) {
+      return { ok: false, error: 'Not enough of this round left to call' };
+    }
+    this.callRequestedAt = now;
+    this.targetChangedAt = 0;
+    this.dropLiveCall();
+    this.buzz(12);
+    this.showToast({
+      kind: 'info',
+      title: 'Call coming',
+      detail: 'Watching for 90 seconds, then it commits',
+    });
+    this.queueSave();
+    this.emitSlow();
+    return { ok: true };
   }
 
   /** Milliseconds until this round's call commits. Zero once it has. */
@@ -1492,11 +1542,16 @@ export class MarketStore {
 
   /** True while the caller is watching a target you changed mid-round. */
   get callRearmed(): boolean {
-    return !this.currentCall && this.targetChangedAt > this.round.startsAt;
+    return (
+      !this.currentCall &&
+      !this.callOnDemand &&
+      this.targetChangedAt > this.round.startsAt
+    );
   }
 
   /** The window the countdown is running against, for a progress bar. */
   get callWaitMs(): number {
+    if (this.callOnDemand) return CALL_ON_DEMAND_MS;
     return this.callRearmed ? rearmDelayFor(this.roundMs) : lockDelayFor(this.roundMs);
   }
 
@@ -1509,6 +1564,7 @@ export class MarketStore {
    */
   private rearmCall(now: number) {
     this.targetChangedAt = now;
+    this.callRequestedAt = 0;
     const had = this.currentCall !== null;
     this.dropLiveCall();
     // Otherwise the "Call locked" toast sits there contradicting the strip,

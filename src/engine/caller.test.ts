@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   INITIAL_MODEL,
+  CALL_ON_DEMAND_MS,
   callDeadlineFor,
   callOpensAt,
   callStats,
+  canRequestCallAt,
   contributions,
   learn,
   lockDelayFor,
@@ -424,5 +426,60 @@ describe('how long a moved target is watched', () => {
       // reachable before the deadline.
       expect(rearm).toBeLessThan(callDeadlineFor(roundMs));
     }
+  });
+});
+
+describe('asking for a call outright', () => {
+  const ROUND = 15 * 60_000;
+  const T = 1_000_000;
+
+  it('commits ninety seconds after the ask', () => {
+    expect(CALL_ON_DEMAND_MS).toBe(90_000);
+    expect(callOpensAt(T, ROUND, 0, T + 30_000)).toBe(T + 120_000);
+  });
+
+  it('is the one thing that can bring the call forward', () => {
+    // Ten seconds in, well before the usual four-minute mark.
+    expect(callOpensAt(T, ROUND, 0, T + 10_000)).toBe(T + 100_000);
+    expect(callOpensAt(T, ROUND, 0, T + 10_000)).toBeLessThan(T + lockDelayFor(ROUND));
+  });
+
+  it('gives way to a target change made after it', () => {
+    const asked = T + 60_000;
+    const moved = T + 8 * 60_000;
+    // The later action is the live intent, so the strike rules apply.
+    expect(callOpensAt(T, ROUND, moved, asked)).toBe(moved + rearmDelayFor(ROUND));
+  });
+
+  it('wins when it is the later of the two', () => {
+    const moved = T + 60_000;
+    const asked = T + 8 * 60_000;
+    expect(callOpensAt(T, ROUND, moved, asked)).toBe(asked + 90_000);
+  });
+
+  it('is ignored when it belongs to an earlier round', () => {
+    expect(callOpensAt(T, ROUND, 0, T - 5_000)).toBe(T + lockDelayFor(ROUND));
+  });
+});
+
+describe('when a call can still be asked for', () => {
+  const ROUND = 15 * 60_000;
+  const T = 1_000_000;
+
+  it('is allowed while ninety seconds still fits before the deadline', () => {
+    expect(canRequestCallAt(T, ROUND, T)).toBe(true);
+    expect(canRequestCallAt(T, ROUND, T + 9 * 60_000)).toBe(true);
+    // The deadline is eleven minutes in, so 9:30 is the last moment.
+    expect(canRequestCallAt(T, ROUND, T + 9 * 60_000 + 30_000)).toBe(true);
+  });
+
+  it('is refused once the wait would run past the deadline', () => {
+    expect(canRequestCallAt(T, ROUND, T + 9 * 60_000 + 31_000)).toBe(false);
+    expect(canRequestCallAt(T, ROUND, T + 14 * 60_000)).toBe(false);
+  });
+
+  it('is never allowed at all on a round too short to hold the wait', () => {
+    // A one-minute round: its deadline is 43.8s in, less than the 90s wait.
+    expect(canRequestCallAt(T, 60_000, T)).toBe(false);
   });
 });

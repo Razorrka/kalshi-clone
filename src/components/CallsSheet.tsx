@@ -240,6 +240,14 @@ export function CallsSheet() {
         nothing to be graded on.
       </div>
       <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>The WITCG button.</strong> Tap it
+        and it commits 90 seconds later, on your clock instead of the round's.
+        It is the one way past "locked and left alone", and it throws away
+        whatever it had already said — so pressing it until you like the answer
+        is possible. Those re-rolls still go in the record, which means the
+        habit shows up in the calibration above rather than hiding in it.
+      </div>
+      <div className="note">
         <strong style={{ color: 'var(--muted)' }}>Change the target and the clock restarts.</strong>{' '}
         A call answers "does it finish above this number", so a different number
         is a different question — the live call is dropped rather than reworded,

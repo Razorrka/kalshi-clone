@@ -22,6 +22,7 @@ import { SignalsSheet } from './components/SignalsSheet';
 import { BalanceSheet } from './components/BalanceSheet';
 import { SignalReadout } from './components/SignalReadout';
 import { CallStrip } from './components/CallStrip';
+import { CallButton } from './components/CallButton';
 import { CallsSheet } from './components/CallsSheet';
 import { ResultToast } from './components/ResultToast';
 
@@ -54,6 +55,7 @@ export default function App() {
             <ResultToast />
           </div>
           <CallStrip />
+          <CallButton />
           <SignalReadout />
           <ControlsRow />
           <TradeArea />

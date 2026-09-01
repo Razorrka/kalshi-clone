@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MarketStore } from './marketStore';
+import { learn } from '../engine/caller';
 
 const MINUTE = 60_000;
 /** A whole minute boundary, so a 1-minute round opens exactly here. */
@@ -809,15 +810,25 @@ describe('grading a call', () => {
     else expect(wouldBe).toBeGreaterThan(wasBefore);
   });
 
-  it('barely moves when you mark it right', () => {
+  it('moves less the surer it was, when you confirm it', () => {
     const call = firstFinishedCall();
-    const before = [...store.callModel.weights];
-    expect(store.gradeCall(call.id, 'right').ok).toBe(true);
+    const model = store.callModel;
+    const before = [...model.weights];
+    const spread = (w: number[]) => Math.max(...w.map((x, i) => Math.abs(x - before[i])));
 
-    // A confirmed call still nudges the weights, just far less than a miss.
-    const moved = store.callModel.weights.map((w, i) => Math.abs(w - before[i]));
-    expect(Math.max(...moved)).toBeGreaterThan(0);
-    expect(Math.max(...moved)).toBeLessThan(0.06);
+    expect(store.gradeCall(call.id, 'right').ok).toBe(true);
+    const confirmed = spread(store.callModel.weights);
+    // What that same call would have done had you marked it wrong instead.
+    const missed = spread(learn(model, call.features, call.side !== 'up').weights);
+
+    expect(confirmed).toBeGreaterThan(0);
+    expect(confirmed).toBeLessThanOrEqual(missed);
+    // Logistic descent steps by how wrong it was, so at confidence c a
+    // confirmation travels (1-c)/c of what a miss would have: a ninth of the
+    // distance at 90% sure, and exactly the same at a coin flip. Stated as a
+    // ratio because the raw step also scales with the features, which vary
+    // with whatever price did.
+    expect(confirmed / missed).toBeCloseTo((1 - call.confidence) / call.confidence, 6);
   });
 
   it('refuses to grade the same call twice', () => {
@@ -1067,5 +1078,112 @@ describe('what you are told when the target moves', () => {
     expect(store.currentCall).toBeNull();
     store.setManualStrike(store.price + 120);
     expect(store.toast?.title).not.toBe('Call cleared');
+  });
+});
+
+describe('asking for a call with the button', () => {
+  const ROUND = 15 * MINUTE;
+  const ON_DEMAND = 90_000;
+
+  beforeEach(() => {
+    vi.setSystemTime(T0 + 1_000);
+    store = new MarketStore();
+    store.setRoundMs(ROUND);
+    store.start();
+  });
+
+  it('commits ninety seconds later, well before the usual mark', () => {
+    run(20_000);
+    expect(store.currentCall).toBeNull();
+    expect(store.requestCall().ok).toBe(true);
+    expect(store.callOnDemand).toBe(true);
+    expect(store.callWaitMs).toBe(ON_DEMAND);
+
+    run(80_000);
+    expect(store.currentCall).toBeNull();
+
+    run(15_000);
+    const call = store.currentCall;
+    expect(call).not.toBeNull();
+    // Under two minutes in, against the four-minute mark it would have waited.
+    expect(call!.lockedAt - store.round.startsAt).toBeLessThan(2 * MINUTE);
+  });
+
+  it('throws away the call it had already made', () => {
+    run(4 * MINUTE + 1_000);
+    const first = store.currentCall!;
+    expect(first).not.toBeNull();
+
+    store.requestCall();
+    expect(store.currentCall).toBeNull();
+    expect(store.calls.some((c) => c.id === first.id)).toBe(false);
+
+    run(ON_DEMAND + 2_000);
+    expect(store.currentCall).not.toBeNull();
+    expect(store.currentCall!.id).not.toBe(first.id);
+  });
+
+  it('counts a re-rolled call in the record like any other', () => {
+    run(4 * MINUTE + 1_000);
+    store.requestCall();
+    run(ON_DEMAND + 2_000);
+    const rerolled = store.currentCall!;
+
+    run(ROUND);
+    const settled = store.calls.find((c) => c.id === rerolled.id)!;
+    expect(settled.outcome).toBeDefined();
+    expect(store.gradeCall(settled.id, 'wrong').ok).toBe(true);
+    expect(store.callRecord.graded).toBe(1);
+    expect(store.callModel.trained).toBe(1);
+  });
+
+  it('is refused once the wait would run past the deadline', () => {
+    run(10 * MINUTE);
+    expect(store.canRequestCall).toBe(false);
+    const result = store.requestCall();
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
+    // And it did not disturb anything by failing.
+    expect(store.callOnDemand).toBe(false);
+  });
+
+  it('can be pressed again to restart the countdown', () => {
+    run(20_000);
+    store.requestCall();
+    run(60_000);
+    expect(store.currentCall).toBeNull();
+
+    store.requestCall();
+    // The clock went back to a full ninety seconds.
+    expect(store.msToCall).toBeGreaterThan(ON_DEMAND - 1_000);
+    run(60_000);
+    expect(store.currentCall).toBeNull();
+    run(35_000);
+    expect(store.currentCall).not.toBeNull();
+  });
+
+  it('gives way to a target moved after the ask', () => {
+    run(20_000);
+    store.requestCall();
+    run(10_000);
+    store.setManualStrike(store.price + 120);
+
+    // The strike change is the later intent, so its rules take over and the
+    // request no longer pulls the call forward.
+    expect(store.callOnDemand).toBe(false);
+    expect(store.callRearmed).toBe(true);
+    run(70_000);
+    expect(store.currentCall).toBeNull();
+  });
+
+  it('goes back to the usual mark on the next round', () => {
+    run(20_000);
+    store.requestCall();
+    run(ON_DEMAND + 2_000);
+    expect(store.currentCall).not.toBeNull();
+
+    run(ROUND);
+    expect(store.callOnDemand).toBe(false);
+    expect(store.callWaitMs).toBe(4 * MINUTE);
   });
 });

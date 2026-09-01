@@ -165,10 +165,33 @@ export function callOpensAt(
   roundStartsAt: number,
   roundMs: number,
   targetChangedAt: number,
+  callRequestedAt = 0,
 ): number {
+  // Asking for a call outright is the one thing that can bring it forward:
+  // it is a deliberate request for an answer at a moment you picked, not the
+  // schedule reacting to something that happened to the market.
+  if (callRequestedAt > roundStartsAt && callRequestedAt >= targetChangedAt) {
+    return callRequestedAt + CALL_ON_DEMAND_MS;
+  }
   const usual = roundStartsAt + lockDelayFor(roundMs);
   if (!(targetChangedAt > roundStartsAt)) return usual;
   return Math.max(usual, targetChangedAt + rearmDelayFor(roundMs));
+}
+
+/** How long after asking for a call it commits. */
+export const CALL_ON_DEMAND_MS = 90_000;
+
+/**
+ * Whether a call asked for now would still land in time to be worth making.
+ * Past this there is not enough round left after the wait, so the button is
+ * dead rather than promising an answer that never arrives.
+ */
+export function canRequestCallAt(
+  roundStartsAt: number,
+  roundMs: number,
+  now: number,
+): boolean {
+  return now + CALL_ON_DEMAND_MS <= roundStartsAt + callDeadlineFor(roundMs);
 }
 
 export type CallGrade = 'right' | 'wrong';

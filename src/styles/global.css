@@ -2158,3 +2158,41 @@ input {
   background: rgba(255, 69, 77, 0.12);
   border-color: rgba(255, 69, 77, 0.3);
 }
+
+.call-button {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  width: calc(100% - 46px);
+  margin: 5px 23px 0;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid #2c323b;
+  flex: none;
+}
+.call-button:active:not(:disabled) {
+  transform: scale(0.99);
+}
+.call-button.armed {
+  border-color: rgba(255, 159, 25, 0.45);
+  background: rgba(255, 159, 25, 0.09);
+}
+.call-button:disabled {
+  opacity: 0.45;
+}
+.call-button-name {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
+  color: var(--accent);
+}
+.call-button.armed .call-button-name {
+  color: var(--accent);
+}
+.call-button-hint {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-2);
+}

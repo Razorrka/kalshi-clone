@@ -72,11 +72,15 @@ export function CallStrip() {
       <button className="call-strip waiting" onClick={() => store.openSheet('calls')}>
         <span className="call-badge pending">···</span>
         <span className="call-text">
-          {store.callRearmed ? 'New target · call locks in ' : 'Call locks in '}
+          {store.callOnDemand
+            ? 'Call coming in '
+            : store.callRearmed
+              ? 'New target · call locks in '
+              : 'Call locks in '}
           <span className="tnum">{fmtClock(wait)}</span>
           {/* The re-arm line is longer, so it goes without the tail rather
               than ellipsing away the countdown's explanation. */}
-          {!store.callRearmed && (
+          {!store.callRearmed && !store.callOnDemand && (
             <span className="dim"> · one answer, then no take-backs</span>
           )}
         </span>
