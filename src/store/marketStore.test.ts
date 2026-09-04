@@ -1187,3 +1187,105 @@ describe('asking for a call with the button', () => {
     expect(store.callWaitMs).toBe(4 * MINUTE);
   });
 });
+
+describe('the flip detector', () => {
+  const ROUND = 15 * MINUTE;
+
+  beforeEach(() => {
+    vi.setSystemTime(T0 + 1_000);
+    store = new MarketStore();
+    store.setRoundMs(ROUND);
+    store.start();
+  });
+
+  it('says nothing until it has tape, then reads continuously', () => {
+    expect(store.flip).toBeNull();
+    run(30_000);
+    const first = store.flip;
+    expect(first).not.toBeNull();
+    expect(first!.probability).toBeGreaterThan(0);
+    expect(first!.probability).toBeLessThan(1);
+
+    // Unlike the locked call, this one is meant to move.
+    run(30_000);
+    expect(store.flip!.at).toBeGreaterThan(first!.at);
+  });
+
+  it('names the side that is actually ahead', () => {
+    // Pin the target well clear of price so the leader cannot change between
+    // the reading and the assertion — the signal is a snapshot on a poll, and
+    // comparing it to a later price would be a race, not a test.
+    run(30_000);
+    store.setManualStrike(store.price - 4_000);
+    run(1_500);
+    const ahead = store.flip!;
+    expect(ahead.leader).toBe('up');
+    expect(ahead.challenger).toBe('down');
+    expect(ahead.direction).toBe('YES → NO');
+
+    store.setManualStrike(store.price + 4_000);
+    run(1_500);
+    const behind = store.flip!;
+    expect(behind.leader).toBe('down');
+    expect(behind.challenger).toBe('up');
+    expect(behind.direction).toBe('NO → YES');
+  });
+
+  it('keeps the answer anchored to the distance from the target', () => {
+    run(60_000);
+    const flip = store.flip!;
+    // Whatever the sixteen inputs are saying, the number stays in the same
+    // neighbourhood as the exact geometry.
+    expect(Math.abs(flip.probability - flip.baseline)).toBeLessThan(0.35);
+  });
+
+  it('gets less worried as the leader pulls clear', () => {
+    run(60_000);
+
+    // Two controlled states, rather than measuring against wherever the walk
+    // happened to be: the target a dollar away, then thousands away. Read
+    // straight after each move, before price has wandered off the pin.
+    store.setManualStrike(store.price + 1);
+    run(1_500);
+    const onTop = store.flip!;
+
+    store.setManualStrike(store.price + 6_000);
+    run(1_500);
+    const clear = store.flip!;
+
+    expect(onTop.probability).toBeGreaterThan(0.8);
+    expect(clear.probability).toBeLessThan(0.05);
+    expect(clear.probability).toBeLessThan(onTop.probability);
+  });
+
+  it('learns setups as they resolve, for the pattern match', () => {
+    expect(store.flipMemorySize).toBe(0);
+    run(5 * MINUTE);
+    expect(store.flipMemorySize).toBeGreaterThan(50);
+  });
+
+  it('gives every reason a side name that matches the leader', () => {
+    run(3 * MINUTE);
+    const flip = store.flip!;
+    for (const reason of flip.reasons) {
+      expect(reason.text).not.toContain('CHALLENGER');
+      expect(reason.text).not.toContain('LEADER');
+    }
+  });
+
+  it('stands down in the last seconds rather than warning about nothing', () => {
+    run(ROUND - 5_000);
+    expect(store.flip).toBeNull();
+  });
+
+  it('stays finite through a slept tab', () => {
+    run(60_000);
+    sleepTab(40 * MINUTE);
+    run(30_000);
+    const flip = store.flip;
+    if (flip) {
+      expect(Number.isFinite(flip.probability)).toBe(true);
+      expect(Number.isFinite(flip.strength)).toBe(true);
+    }
+  });
+});

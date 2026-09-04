@@ -2196,3 +2196,166 @@ input {
   font-weight: 600;
   color: var(--muted-2);
 }
+
+/* ---- flip detection ----------------------------------------------------- */
+
+.flip-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 46px);
+  margin: 5px 23px 0;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: var(--surface);
+  border: 1px solid #1e232b;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: left;
+  flex: none;
+}
+.flip-strip.warm {
+  border-color: rgba(255, 159, 25, 0.3);
+}
+.flip-strip.hot {
+  border-color: rgba(255, 69, 77, 0.5);
+  background: linear-gradient(90deg, rgba(255, 69, 77, 0.1), var(--surface) 65%);
+}
+.flip-strip .dim {
+  color: var(--muted-2);
+  font-weight: 600;
+}
+.flip-tag {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1.1px;
+  color: var(--muted-2);
+  flex: none;
+}
+.flip-strip.hot .flip-tag {
+  color: var(--down);
+}
+.flip-dir {
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  flex: none;
+}
+.flip-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flip-strength {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--muted);
+  flex: none;
+}
+.flip-strip.hot .flip-strength {
+  color: var(--down);
+}
+
+.flip-headline {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.flip-headline.hot {
+  border-color: rgba(255, 69, 77, 0.35);
+}
+.flip-headline-dir {
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  margin-bottom: 10px;
+}
+.flip-headline-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.flip-headline-row .k {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+.flip-headline-row .v {
+  font-size: 18px;
+  font-weight: 800;
+  margin-top: 2px;
+}
+
+.flip-reasons {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.65;
+  color: var(--muted);
+}
+.flip-reasons li::marker {
+  color: var(--accent);
+}
+
+.flip-table {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+}
+.flip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.flip-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flip-row-z {
+  width: 58px;
+  text-align: right;
+  color: var(--muted);
+  flex: none;
+}
+.flip-row-worth {
+  width: 96px;
+  text-align: right;
+  font-size: 10px;
+  font-weight: 700;
+  flex: none;
+}
+.flip-row-worth.good {
+  color: var(--up);
+}
+.flip-row-worth.mid {
+  color: var(--muted);
+}
+.flip-row-worth.dead {
+  color: var(--muted-2);
+}
+.flip-reasons li.backed {
+  color: var(--text);
+}
+.flip-reasons li.backed::marker {
+  color: var(--up);
+}
+.flip-reasons .unbacked {
+  color: var(--muted-2);
+  font-weight: 600;
+  font-size: 11px;
+}

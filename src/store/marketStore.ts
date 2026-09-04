@@ -53,6 +53,14 @@ import {
   type CallStats,
   type LockedCall,
 } from '../engine/caller';
+import {
+  FLIP_HORIZON_MS,
+  FlipRolling,
+  extractFlipFeatures,
+  makeFlipSignal,
+  type FlipMemory,
+  type FlipSignal,
+} from '../engine/flip';
 import { clearState, loadState, saveState } from './persist';
 
 /** ~5 Hz sampling keeps an hour of tape in a few thousand points. */
@@ -68,6 +76,11 @@ const STARTING_BALANCE_CENTS = 1_000_00;
 const MAX_CALLS = 60;
 /** How far back "momentum" looks when the call is made. */
 const MOMENTUM_WINDOW_MS = 120_000;
+/** How often the flip detector re-reads the tape. Sixteen features is real
+ *  work, and nothing it measures moves meaningfully inside a second. */
+const FLIP_POLL_MS = 1_000;
+/** Past setups kept for the pattern match. */
+const MAX_FLIP_MEMORY = 400;
 
 export type SheetName =
   | 'book'
@@ -78,7 +91,8 @@ export type SheetName =
   | 'strike'
   | 'signals'
   | 'balance'
-  | 'calls';
+  | 'calls'
+  | 'flip';
 
 export interface Toast {
   id: number;
@@ -161,6 +175,10 @@ export class MarketStore {
   /** When a call was last asked for outright. Same round-scoped lifetime. */
   callRequestedAt = 0;
 
+  // ---- the flip detector -------------------------------------------------
+  /** The live reading, or null before it has enough tape to say anything. */
+  flip: FlipSignal | null = null;
+
   // ---- ui ----------------------------------------------------------------
   timeframe: Timeframe = 'live';
   strikeMode: StrikeMode = 'auto';
@@ -190,6 +208,11 @@ export class MarketStore {
   private toastSeq = 1;
   private idSeq = 1;
   private saveQueued = false;
+  private flipRolling = new FlipRolling();
+  private flipMemory: FlipMemory[] = [];
+  private flipPending: { features: FlipSignal['features']; leader: number; deadline: number }[] = [];
+  private lastFlipAt = 0;
+  private freshTape: TapeEntry[] = [];
 
   constructor() {
     const saved = loadState();
@@ -422,6 +445,7 @@ export class MarketStore {
     const filled = this.fillRestingOrders(now);
     const called = this.maybeLockCall(now);
     this.pollTape(now);
+    this.updateFlip(now);
 
     if (this.sheet === 'book') this.book = this.bookSim.snapshot(this.quote.pUp);
 
@@ -545,6 +569,9 @@ export class MarketStore {
     const entry = this.tapeSim.poll(now, this.quote.pUp);
     if (!entry) return;
     this.tape = [entry, ...this.tape].slice(0, MAX_TAPE);
+    // The strip keeps four; the detector needs every one that went by since
+    // it last looked.
+    this.freshTape.push(entry);
   }
 
   // =========================================================================
@@ -1451,6 +1478,90 @@ export class MarketStore {
     this.feed?.stop();
     this.feed = null;
     this.livePrice = 0;
+  }
+
+  // =========================================================================
+  // the flip detector
+  // =========================================================================
+
+  /**
+   * Re-reads the sixteen inputs and re-scores the chance the favoured side
+   * changes inside the next minute.
+   *
+   * Separate from the locked call on purpose: that one commits to how the
+   * round ends and never moves, this one watches the near term and is
+   * supposed to move. They answer different questions.
+   */
+  private updateFlip(now: number) {
+    if (now - this.lastFlipAt < FLIP_POLL_MS) return;
+    this.lastFlipAt = now;
+    if (this.mode === 'live' && this.livePrice <= 0) return;
+    if (this.series.length < 30) return;
+
+    const msLeft = Math.max(0, this.round.endsAt - now);
+    const leader = Math.sign(this.price - this.round.strike);
+
+    // Anything waiting on a verdict either got its flip or ran out of time.
+    for (let i = this.flipPending.length - 1; i >= 0; i--) {
+      const p = this.flipPending[i];
+      if (leader !== p.leader) {
+        this.rememberFlip(p.features, true);
+        this.flipPending.splice(i, 1);
+      } else if (now > p.deadline) {
+        this.rememberFlip(p.features, false);
+        this.flipPending.splice(i, 1);
+      }
+    }
+
+    // Too little round left to warn about anything.
+    if (msLeft < 10_000) {
+      this.flip = null;
+      return;
+    }
+
+    const raw = extractFlipFeatures(
+      {
+        series: this.series,
+        bars: this.minuteBars,
+        // The book is only rendered while its sheet is open, so read a fresh
+        // snapshot here rather than scoring a stale one.
+        book: this.bookSim.snapshot(this.quote.pUp),
+        freshTape: this.freshTape,
+        spot: this.price,
+        strike: this.round.strike,
+        annualVol: this.annualVol,
+        msLeft,
+        now,
+      },
+      this.flipRolling,
+    );
+    this.freshTape = [];
+
+    const features = this.flipRolling.normalise(raw);
+    this.flip = makeFlipSignal(
+      features,
+      this.flipMemory,
+      this.flipRolling.samples,
+      this.price,
+      this.round.strike,
+      now,
+    );
+    this.flipPending.push({
+      features,
+      leader,
+      deadline: now + Math.min(FLIP_HORIZON_MS, msLeft),
+    });
+  }
+
+  /** Files a resolved setup so the pattern match has something to match on. */
+  private rememberFlip(features: FlipSignal['features'], flipped: boolean) {
+    this.flipMemory.push({ features, flipped });
+    if (this.flipMemory.length > MAX_FLIP_MEMORY) this.flipMemory.shift();
+  }
+
+  /** How many resolved setups the pattern match has to draw on. */
+  get flipMemorySize(): number {
+    return this.flipMemory.length;
   }
 
   // =========================================================================

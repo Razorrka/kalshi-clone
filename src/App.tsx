@@ -23,6 +23,8 @@ import { BalanceSheet } from './components/BalanceSheet';
 import { SignalReadout } from './components/SignalReadout';
 import { CallStrip } from './components/CallStrip';
 import { CallButton } from './components/CallButton';
+import { FlipStrip } from './components/FlipStrip';
+import { FlipSheet } from './components/FlipSheet';
 import { CallsSheet } from './components/CallsSheet';
 import { ResultToast } from './components/ResultToast';
 
@@ -56,6 +58,7 @@ export default function App() {
           </div>
           <CallStrip />
           <CallButton />
+          <FlipStrip />
           <SignalReadout />
           <ControlsRow />
           <TradeArea />
@@ -71,6 +74,7 @@ export default function App() {
         {store.sheet === 'signals' && <SignalsSheet />}
         {store.sheet === 'balance' && <BalanceSheet />}
         {store.sheet === 'calls' && <CallsSheet />}
+        {store.sheet === 'flip' && <FlipSheet />}
       </div>
     </div>
   );
