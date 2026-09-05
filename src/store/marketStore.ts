@@ -106,7 +106,8 @@ export type SheetName =
   | 'calls'
   | 'flip'
   | 'gold'
-  | 'coach';
+  | 'coach'
+  | 'proving';
 
 export interface Toast {
   id: number;

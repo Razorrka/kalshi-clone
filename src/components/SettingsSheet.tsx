@@ -161,6 +161,20 @@ export function SettingsSheet() {
         <button className="danger-btn" onClick={() => store.resetAccount()}>
           Reset to {fmtMoney(store.startingBalanceCents / 100)}
         </button>
+        <button
+          className="danger-btn"
+          style={{ borderColor: '#2c323b', color: '#fff' }}
+          onClick={() => store.openSheet('coach')}
+        >
+          Discipline rules and limits
+        </button>
+        <button
+          className="danger-btn"
+          style={{ borderColor: '#2c323b', color: '#fff' }}
+          onClick={() => store.openSheet('proving')}
+        >
+          Proving ground — test any strategy
+        </button>
       </div>
 
       <div className="note">

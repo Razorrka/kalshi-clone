@@ -27,6 +27,7 @@ import { FlipStrip } from './components/FlipStrip';
 import { GoldStrip } from './components/GoldStrip';
 import { CoachBanner } from './components/CoachBanner';
 import { CoachSheet } from './components/CoachSheet';
+import { ProvingSheet } from './components/ProvingSheet';
 import { GoldSheet } from './components/GoldSheet';
 import { FlipSheet } from './components/FlipSheet';
 import { CallsSheet } from './components/CallsSheet';
@@ -83,6 +84,7 @@ export default function App() {
         {store.sheet === 'flip' && <FlipSheet />}
         {store.sheet === 'gold' && <GoldSheet />}
         {store.sheet === 'coach' && <CoachSheet />}
+        {store.sheet === 'proving' && <ProvingSheet />}
       </div>
     </div>
   );

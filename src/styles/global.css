@@ -2770,3 +2770,79 @@ input {
   color: var(--muted);
   margin-top: 1px;
 }
+
+/* ---- the proving ground -------------------------------------------------- */
+
+.proving-sizes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.proving-sizes .chip.active {
+  color: var(--ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.proving-row {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  margin-bottom: 6px;
+}
+.proving-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.proving-name {
+  font-size: 12.5px;
+  font-weight: 800;
+  flex: 1;
+  min-width: 0;
+}
+.proving-verdict {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  flex: none;
+}
+.proving-verdict.good {
+  color: var(--up);
+}
+.proving-verdict.bad {
+  color: var(--down);
+}
+.proving-verdict.dead {
+  color: var(--muted-2);
+}
+.proving-nums {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-2);
+}
+.proving-nums b {
+  color: var(--text);
+  font-weight: 800;
+}
+.proving-nums .pos b {
+  color: var(--up);
+}
+.proving-nums .neg b {
+  color: var(--down);
+}
+.proving-nums .ci {
+  color: var(--muted-2);
+  font-weight: 600;
+}
+.proving-blurb {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted-2);
+  line-height: 1.45;
+  margin-top: 5px;
+}

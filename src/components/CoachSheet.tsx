@@ -178,6 +178,21 @@ export function CoachSheet() {
         </div>
       </div>
 
+      <div className="section-label">Check a claim yourself</div>
+      <div className="note">
+        Someone will hand you a list of indicators that make it "10x more
+        accurate". The proving ground runs any of them over thousands of
+        independent rounds and reports what they actually did, with an
+        interval. It is faster than arguing.
+      </div>
+      <button
+        className="chip"
+        style={{ width: '100%', marginBottom: 10 }}
+        onClick={() => store.openSheet('proving')}
+      >
+        Open the proving ground
+      </button>
+
       <button className="chip" style={{ width: '100%', marginTop: 10 }} onClick={() => store.resetSession()}>
         Start a fresh session from here
       </button>
