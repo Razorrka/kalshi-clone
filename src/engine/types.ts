@@ -46,6 +46,12 @@ export interface Position {
   closeValue?: number;
   /** the resting order this position was filled from, if any */
   fromOrderId?: string;
+  /**
+   * Set when this was taken while the edge hunter was lit on this side, with
+   * the expected value it was claiming at the time. Settlement scores it, so
+   * the hunter's record is what its picks really did rather than what it said.
+   */
+  goldEv?: number;
 }
 
 export type OrderStatus = 'resting' | 'filled' | 'cancelled' | 'expired';

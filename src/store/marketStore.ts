@@ -61,6 +61,7 @@ import {
   type FlipMemory,
   type FlipSignal,
 } from '../engine/flip';
+import { findEdge, type EdgePick } from '../engine/edge';
 import { clearState, loadState, saveState } from './persist';
 
 /** ~5 Hz sampling keeps an hour of tape in a few thousand points. */
@@ -81,6 +82,8 @@ const MOMENTUM_WINDOW_MS = 120_000;
 const FLIP_POLL_MS = 1_000;
 /** Past setups kept for the pattern match. */
 const MAX_FLIP_MEMORY = 400;
+/** Resolved gold signals kept, so the record means something without growing. */
+const MAX_GOLD_RECORD = 200;
 
 export type SheetName =
   | 'book'
@@ -92,7 +95,8 @@ export type SheetName =
   | 'signals'
   | 'balance'
   | 'calls'
-  | 'flip';
+  | 'flip'
+  | 'gold';
 
 export interface Toast {
   id: number;
@@ -150,6 +154,8 @@ export class MarketStore {
   signalsOn = true;
   /** UT Bot "key value": how tightly the stop trails. Lower = more signals. */
   signalKey = SIGNAL_RULES.keyValue;
+  /** How loose the edge hunter is, 0 (patient) to 1 (takes anything in band). */
+  goldAggression = 0.5;
   feedStatus: FeedStatus = 'idle';
   feedDetail = '';
 
@@ -178,6 +184,12 @@ export class MarketStore {
   // ---- the flip detector -------------------------------------------------
   /** The live reading, or null before it has enough tape to say anything. */
   flip: FlipSignal | null = null;
+
+  // ---- the edge hunter ---------------------------------------------------
+  /** The best-priced ticket in the payout window right now, if any. */
+  gold: EdgePick | null = null;
+  /** Every gold signal that has since resolved, newest first. */
+  goldRecord: { side: Side; multiplier: number; ev: number; won: boolean }[] = [];
 
   // ---- ui ----------------------------------------------------------------
   timeframe: Timeframe = 'live';
@@ -242,6 +254,12 @@ export class MarketStore {
       if (typeof saved.signalsOn === 'boolean') this.signalsOn = saved.signalsOn;
       if (typeof saved.signalKey === 'number' && saved.signalKey > 0) {
         this.signalKey = saved.signalKey;
+      }
+      if (typeof saved.goldAggression === 'number') {
+        this.goldAggression = clamp(saved.goldAggression, 0, 1);
+      }
+      if (Array.isArray(saved.goldRecord)) {
+        this.goldRecord = saved.goldRecord.slice(0, MAX_GOLD_RECORD);
       }
       if (Array.isArray(saved.calls)) this.calls = saved.calls.slice(0, MAX_CALLS);
       // A model restored from storage decides real calls, so anything that is
@@ -446,6 +464,7 @@ export class MarketStore {
     const called = this.maybeLockCall(now);
     this.pollTape(now);
     this.updateFlip(now);
+    this.updateGold();
 
     if (this.sheet === 'book') this.book = this.bookSim.snapshot(this.quote.pUp);
 
@@ -680,6 +699,9 @@ export class MarketStore {
     this.positions = this.positions.map((pos) => {
       if (pos.roundId !== round.id || pos.status !== 'open') return pos;
       staked += pos.stake;
+      if (pos.goldEv !== undefined) {
+        this.recordGold(pos.side, pos.multiplier, pos.goldEv, pos.side === result);
+      }
       if (pos.side === result) {
         const credit = Math.round(pos.stake * pos.multiplier * 100);
         this.balanceCents += credit;
@@ -880,6 +902,9 @@ export class MarketStore {
       entryProb: side === 'up' ? this.quote.pUp : 1 - this.quote.pUp,
       placedAt: Date.now(),
       status: 'open',
+      // Tagged at entry, so the hunter is scored on tickets actually taken
+      // while it was lit rather than on what it claimed afterwards.
+      ...(this.gold?.side === side ? { goldEv: this.gold.ev } : {}),
     };
     this.balanceCents -= Math.round(amount * 100);
     this.positions = [position, ...this.positions];
@@ -1481,6 +1506,66 @@ export class MarketStore {
   }
 
   // =========================================================================
+  // the edge hunter
+  // =========================================================================
+
+  /**
+   * Re-reads the board for the best-priced ticket in the payout window.
+   *
+   * Cheap enough to run every tick: it is two multiplier lookups and a table
+   * read, not sixteen features.
+   */
+  private updateGold() {
+    this.gold = findEdge({
+      pUp: this.quote.pUp,
+      balance: this.balance,
+      aggression: this.goldAggression,
+      tradable: this.canTrade,
+    });
+  }
+
+  /** How picky the edge hunter is. 0 waits for the best band, 1 takes the lot. */
+  setGoldAggression(value: number) {
+    const next = clamp(value, 0, 1);
+    if (next === this.goldAggression) return;
+    this.goldAggression = next;
+    this.updateGold();
+    this.queueSave();
+    this.emitSlow();
+  }
+
+  /** True when this side is the one the hunter is lit up on. */
+  isGoldSide(side: Side): boolean {
+    return this.gold?.side === side;
+  }
+
+  /** What the gold picks have actually done, which is the only honest score. */
+  get goldSummary(): { n: number; won: number; staked: number; returned: number } {
+    let staked = 0;
+    let returned = 0;
+    let won = 0;
+    for (const r of this.goldRecord) {
+      staked += 1;
+      if (r.won) {
+        returned += r.multiplier;
+        won += 1;
+      }
+    }
+    return { n: this.goldRecord.length, won, staked, returned };
+  }
+
+  /**
+   * Files a bet that was taken while the hunter was lit on that side, once
+   * its round has resolved.
+   */
+  private recordGold(side: Side, multiplier: number, ev: number, won: boolean) {
+    this.goldRecord = [{ side, multiplier, ev, won }, ...this.goldRecord].slice(
+      0,
+      MAX_GOLD_RECORD,
+    );
+  }
+
+  // =========================================================================
   // the flip detector
   // =========================================================================
 
@@ -1844,6 +1929,8 @@ export class MarketStore {
         hapticsOn: this.hapticsOn,
         signalsOn: this.signalsOn,
         signalKey: this.signalKey,
+        goldAggression: this.goldAggression,
+        goldRecord: this.goldRecord,
         calls: this.calls,
         callModel: this.callModel,
       });

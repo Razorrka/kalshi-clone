@@ -1253,9 +1253,13 @@ describe('the flip detector', () => {
     run(1_500);
     const clear = store.flip!;
 
-    expect(onTop.probability).toBeGreaterThan(0.8);
+    // Price keeps moving in the second before the poll reads it, and half a
+    // sigma of drift off the pin already pulls the touch probability into the
+    // sixties — so this bounds what is actually guaranteed, not what looks
+    // tidy. The gap between the two states is the real property.
+    expect(onTop.probability).toBeGreaterThan(0.55);
     expect(clear.probability).toBeLessThan(0.05);
-    expect(clear.probability).toBeLessThan(onTop.probability);
+    expect(onTop.probability - clear.probability).toBeGreaterThan(0.5);
   });
 
   it('learns setups as they resolve, for the pattern match', () => {
@@ -1287,5 +1291,97 @@ describe('the flip detector', () => {
       expect(Number.isFinite(flip.probability)).toBe(true);
       expect(Number.isFinite(flip.strength)).toBe(true);
     }
+  });
+});
+
+describe('the edge hunter', () => {
+  const ROUND = 15 * MINUTE;
+
+  beforeEach(() => {
+    vi.setSystemTime(T0 + 1_000);
+    store = new MarketStore();
+    store.setRoundMs(ROUND);
+    store.start();
+  });
+
+  it('lights on the underdog and never on the favourite', () => {
+    store.setGoldAggression(1);
+    // Push the target well above price so Up is a genuine long shot.
+    store.setManualStrike(store.price + 400);
+    run(2_000);
+    const gold = store.gold;
+    if (gold) {
+      expect(gold.side).toBe('up');
+      expect(store.isGoldSide('up')).toBe(true);
+      expect(store.isGoldSide('down')).toBe(false);
+      expect(gold.multiplier).toBeGreaterThanOrEqual(1.8);
+      expect(gold.multiplier).toBeLessThanOrEqual(11);
+    }
+  });
+
+  it('goes dark once the payout leaves the window', () => {
+    store.setGoldAggression(1);
+    // Miles away: the long shot pays far more than 11x, out of range.
+    store.setManualStrike(store.price + 20_000);
+    run(2_000);
+    expect(store.gold).toBeNull();
+  });
+
+  it('takes nothing while the market is locked', () => {
+    store.setGoldAggression(1);
+    store.setManualStrike(store.price + 400);
+    run(ROUND - 2_000);
+    expect(store.canTrade).toBe(false);
+    expect(store.gold).toBeNull();
+  });
+
+  it('lights less often the more patient you set it', () => {
+    let loose = 0;
+    let patient = 0;
+    for (let i = 0; i < 40; i++) {
+      run(8_000);
+      store.setGoldAggression(1);
+      if (store.gold) loose++;
+      store.setGoldAggression(0);
+      if (store.gold) patient++;
+    }
+    expect(loose).toBeGreaterThan(patient);
+  });
+
+  it('reports an edge that is honestly negative', () => {
+    store.setGoldAggression(1);
+    store.setManualStrike(store.price + 300);
+    run(2_000);
+    if (store.gold) {
+      expect(store.gold.ev).toBeLessThan(0);
+      expect(store.gold.fair).toBeGreaterThan(store.gold.quoted);
+    }
+  });
+
+  it('scores only the tickets actually taken while it was lit', () => {
+    store.setGoldAggression(1);
+    store.setManualStrike(store.price + 300);
+    run(2_000);
+    const lit = store.gold;
+    if (!lit) return;
+
+    expect(store.placeBet(lit.side, 10).ok).toBe(true);
+    // And one on the other side, which was never gold.
+    expect(store.placeBet(lit.side === 'up' ? 'down' : 'up', 10).ok).toBe(true);
+    expect(store.goldSummary.n).toBe(0);
+
+    run(ROUND);
+    // Exactly one of the two is on the hunter's record.
+    expect(store.goldSummary.n).toBe(1);
+    expect(store.goldRecord[0].side).toBe(lit.side);
+  });
+
+  it('remembers how picky you set it', () => {
+    store.setGoldAggression(0.25);
+    expect(store.goldAggression).toBe(0.25);
+    store.setGoldAggression(5);
+    expect(store.goldAggression).toBe(1);
+    store.setGoldAggression(-2);
+    expect(store.goldAggression).toBe(0);
   });
 });

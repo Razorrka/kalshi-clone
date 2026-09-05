@@ -1,4 +1,5 @@
 import type {
+  Side,
   ComboTicket,
   FeedMode,
   LimitOrder,
@@ -28,6 +29,8 @@ export interface PersistedState {
   hapticsOn: boolean;
   signalsOn: boolean;
   signalKey: number;
+  goldAggression: number;
+  goldRecord: { side: Side; multiplier: number; ev: number; won: boolean }[];
   calls: LockedCall[];
   callModel: CallModel;
 }
