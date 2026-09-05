@@ -36,11 +36,18 @@ export function TradeArea() {
         {(['up', 'down'] as const).map((side) => {
           const stake = store.stakeOn(side);
           return (
-            <div className={`bet${store.isGoldSide(side) ? ' gold' : ''}`} key={side}>
+            <div
+              className={`bet${store.isGoldSide(side) ? ' gold' : ''}${
+                store.blocked ? ' blocked' : ''
+              }`}
+              key={side}
+            >
               <button
                 className={`bet-btn ${side}${store.isGoldSide(side) ? ' gold' : ''}`}
                 disabled={!canTrade}
-                onClick={() => store.openSheet('ticket', side)}
+                onClick={() =>
+                  store.blocked ? store.openSheet('coach') : store.openSheet('ticket', side)
+                }
               >
                 {label(side)}
               </button>

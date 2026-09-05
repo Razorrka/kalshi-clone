@@ -2564,3 +2564,209 @@ input {
   font-weight: 600;
   font-size: 10px;
 }
+
+/* ---- the discipline coach ----------------------------------------------- */
+
+.coach-banner {
+  width: calc(100% - 46px);
+  margin: 6px 23px 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  text-align: left;
+  flex: none;
+  border: 1px solid;
+  animation: coach-in 220ms ease-out;
+}
+@keyframes coach-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.coach-banner.stop {
+  border-color: rgba(255, 69, 77, 0.65);
+  background: linear-gradient(90deg, rgba(255, 69, 77, 0.18), rgba(255, 69, 77, 0.05));
+}
+.coach-banner.wait {
+  border-color: rgba(255, 159, 25, 0.6);
+  background: linear-gradient(90deg, rgba(255, 159, 25, 0.16), rgba(255, 159, 25, 0.04));
+}
+.coach-word {
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: 1.6px;
+  line-height: 1;
+}
+.coach-banner.stop .coach-word {
+  color: var(--down);
+}
+.coach-banner.wait .coach-word {
+  color: var(--accent);
+}
+.coach-line {
+  font-size: 12px;
+  font-weight: 800;
+  margin-top: 5px;
+  letter-spacing: 0.2px;
+}
+.coach-action {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.bet.blocked .bet-btn {
+  filter: grayscale(0.75) brightness(0.6);
+}
+
+.coach-card {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid;
+  margin-bottom: 4px;
+}
+.coach-card.stop {
+  border-color: rgba(255, 69, 77, 0.55);
+  background: rgba(255, 69, 77, 0.09);
+}
+.coach-card.wait {
+  border-color: rgba(255, 159, 25, 0.5);
+  background: rgba(255, 159, 25, 0.08);
+}
+.coach-card-word {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  line-height: 1;
+}
+.coach-card.stop .coach-card-word {
+  color: var(--down);
+}
+.coach-card.wait .coach-card-word {
+  color: var(--accent);
+}
+.coach-card-line {
+  font-size: 14px;
+  font-weight: 800;
+  margin-top: 8px;
+}
+.coach-card-action {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.coach-finding {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border-left: 3px solid var(--muted-2);
+  margin-bottom: 6px;
+}
+.coach-finding.sev3 {
+  border-left-color: var(--down);
+}
+.coach-finding.sev2 {
+  border-left-color: var(--accent);
+}
+.coach-finding-head {
+  font-size: 12px;
+  font-weight: 800;
+}
+.coach-finding-body {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1.5;
+  margin-top: 3px;
+}
+
+.ruin-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.ruin-row {
+  display: grid;
+  grid-template-columns: 1fr 88px 48px;
+  gap: 8px;
+  align-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.ruin-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.ruin-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.ruin-bar span {
+  display: block;
+  height: 100%;
+  background: var(--down);
+  border-radius: 4px;
+}
+.ruin-pct {
+  text-align: right;
+}
+.ruin-pct.ok {
+  color: var(--up);
+}
+.ruin-pct.mid {
+  color: var(--accent);
+}
+.ruin-pct.bad {
+  color: var(--down);
+}
+.coach-inline {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid;
+  margin-bottom: 8px;
+}
+.coach-inline.stop {
+  border-color: rgba(255, 69, 77, 0.6);
+  background: rgba(255, 69, 77, 0.12);
+}
+.coach-inline.wait {
+  border-color: rgba(255, 159, 25, 0.55);
+  background: rgba(255, 159, 25, 0.1);
+}
+.coach-inline-word {
+  display: block;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 1.3px;
+}
+.coach-inline.stop .coach-inline-word {
+  color: var(--down);
+}
+.coach-inline.wait .coach-inline-word {
+  color: var(--accent);
+}
+.coach-inline-line {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 800;
+  margin-top: 3px;
+}
+.coach-inline-action {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-top: 1px;
+}

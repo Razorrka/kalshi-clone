@@ -8,6 +8,7 @@ import type {
   StrikeMode,
 } from '../engine/types';
 import type { VolPreset } from '../engine/priceEngine';
+import type { CoachLimits } from '../engine/coach';
 import type { CallModel, LockedCall } from '../engine/caller';
 
 const KEY = 'jitcoin:v1';
@@ -31,6 +32,8 @@ export interface PersistedState {
   signalKey: number;
   goldAggression: number;
   goldRecord: { side: Side; multiplier: number; ev: number; won: boolean }[];
+  limits: CoachLimits;
+  coachOn: boolean;
   calls: LockedCall[];
   callModel: CallModel;
 }

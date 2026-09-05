@@ -62,6 +62,13 @@ import {
   type FlipSignal,
 } from '../engine/flip';
 import { findEdge, type EdgePick } from '../engine/edge';
+import {
+  DEFAULT_LIMITS,
+  coach,
+  type BetRecord,
+  type CoachCall,
+  type CoachLimits,
+} from '../engine/coach';
 import { clearState, loadState, saveState } from './persist';
 
 /** ~5 Hz sampling keeps an hour of tape in a few thousand points. */
@@ -84,6 +91,8 @@ const FLIP_POLL_MS = 1_000;
 const MAX_FLIP_MEMORY = 400;
 /** Resolved gold signals kept, so the record means something without growing. */
 const MAX_GOLD_RECORD = 200;
+/** Tickets the coach reads back over. A session, not a lifetime. */
+const MAX_BET_LOG = 120;
 
 export type SheetName =
   | 'book'
@@ -96,7 +105,8 @@ export type SheetName =
   | 'balance'
   | 'calls'
   | 'flip'
-  | 'gold';
+  | 'gold'
+  | 'coach';
 
 export interface Toast {
   id: number;
@@ -191,6 +201,19 @@ export class MarketStore {
   /** Every gold signal that has since resolved, newest first. */
   goldRecord: { side: Side; multiplier: number; ev: number; won: boolean }[] = [];
 
+  // ---- the discipline coach ----------------------------------------------
+  /** What the coach says about the ticket being considered right now. */
+  coachCall: CoachCall | null = null;
+  /** Your own limits. The coach enforces these, it does not invent them. */
+  limits: CoachLimits = { ...DEFAULT_LIMITS };
+  /** Balance when this session began, which is what a drawdown is measured from. */
+  sessionStart = STARTING_BALANCE_CENTS / 100;
+  /** Every ticket this session, newest first, for reading the run off. */
+  betLog: BetRecord[] = [];
+  /** True once you have chosen to trade through a STOP. */
+  overrodeAt = 0;
+  coachOn = true;
+
   // ---- ui ----------------------------------------------------------------
   timeframe: Timeframe = 'live';
   strikeMode: StrikeMode = 'auto';
@@ -261,6 +284,8 @@ export class MarketStore {
       if (Array.isArray(saved.goldRecord)) {
         this.goldRecord = saved.goldRecord.slice(0, MAX_GOLD_RECORD);
       }
+      if (saved.limits) this.limits = { ...DEFAULT_LIMITS, ...saved.limits };
+      if (typeof saved.coachOn === 'boolean') this.coachOn = saved.coachOn;
       if (Array.isArray(saved.calls)) this.calls = saved.calls.slice(0, MAX_CALLS);
       // A model restored from storage decides real calls, so anything that is
       // not four finite numbers goes back to the untrained prior.
@@ -462,6 +487,7 @@ export class MarketStore {
     this.recompute(now);
     const filled = this.fillRestingOrders(now);
     const called = this.maybeLockCall(now);
+    this.updateCoach();
     this.pollTape(now);
     this.updateFlip(now);
     this.updateGold();
@@ -702,6 +728,7 @@ export class MarketStore {
       if (pos.goldEv !== undefined) {
         this.recordGold(pos.side, pos.multiplier, pos.goldEv, pos.side === result);
       }
+      this.settleBetLog(pos.placedAt, pos.side === result);
       if (pos.side === result) {
         const credit = Math.round(pos.stake * pos.multiplier * 100);
         this.balanceCents += credit;
@@ -908,6 +935,20 @@ export class MarketStore {
     };
     this.balanceCents -= Math.round(amount * 100);
     this.positions = [position, ...this.positions];
+    this.betLog = [
+      {
+        stake: amount,
+        at: position.placedAt,
+        side,
+        status: 'open' as const,
+        entryProb: position.entryProb,
+        multiplier,
+        msLeftAtEntry: this.msLeft,
+      },
+      ...this.betLog,
+    ].slice(0, MAX_BET_LOG);
+    // An override buys exactly one ticket.
+    this.overrodeAt = 0;
     this.buzz(10);
     this.queueSave();
     this.emitSlow();
@@ -1506,6 +1547,122 @@ export class MarketStore {
   }
 
   // =========================================================================
+  // the discipline coach
+  // =========================================================================
+
+  /**
+   * Re-reads the coach against whatever ticket is being considered.
+   *
+   * The stake it judges is the one in the ticket sheet if that is open, and
+   * the default stake otherwise — so the warning is about the bet you are
+   * actually about to make, not a hypothetical one.
+   */
+  private updateCoach() {
+    if (!this.coachOn) {
+      this.coachCall = null;
+      return;
+    }
+    const side = this.ticketSide;
+    this.coachCall = coach({
+      bets: this.betLog,
+      balance: this.balance,
+      sessionStart: this.sessionStart,
+      now: Date.now(),
+      proposedStake: this.sheet === 'ticket' ? this.ticketStake : 0,
+      proposedProb: side === 'up' ? this.quote.pUp : 1 - this.quote.pUp,
+      msLeft: this.msLeft,
+      limits: this.limits,
+    });
+  }
+
+  /** Marks a logged ticket with how it went, so the coach can read the run. */
+  private settleBetLog(placedAt: number, won: boolean) {
+    this.betLog = this.betLog.map((b) =>
+      b.at === placedAt && b.status === 'open'
+        ? { ...b, status: won ? ('won' as const) : ('lost' as const) }
+        : b,
+    );
+  }
+
+  /** What the coach says about a specific size, for the ticket sheet. */
+  judge(side: Side, stake: number): CoachCall {
+    return coach({
+      bets: this.betLog,
+      balance: this.balance,
+      sessionStart: this.sessionStart,
+      now: Date.now(),
+      proposedStake: stake,
+      proposedProb: side === 'up' ? this.quote.pUp : 1 - this.quote.pUp,
+      msLeft: this.msLeft,
+      limits: this.limits,
+    });
+  }
+
+  /** True while the coach is telling you to sit out and you have not overridden. */
+  get blocked(): boolean {
+    if (!this.coachOn) return false;
+    // An override lasts one ticket, not the rest of the session.
+    if (Date.now() - this.overrodeAt < 15_000) return false;
+    const call = coach({
+      bets: this.betLog,
+      balance: this.balance,
+      sessionStart: this.sessionStart,
+      now: Date.now(),
+      // Judged with no ticket in hand, so only the standing reasons to sit
+      // out count — a run of losses or a blown drawdown, not the size of
+      // something you have not typed yet.
+      proposedStake: 0,
+      proposedProb: 0.5,
+      msLeft: this.msLeft,
+      limits: this.limits,
+    });
+    return call.verdict === 'STOP';
+  }
+
+  /** Seconds left on a forced break, or 0. */
+  get cooldownLeft(): number {
+    const until = this.coachCall?.cooldownUntil ?? 0;
+    return Math.max(0, Math.ceil((until - Date.now()) / 1000));
+  }
+
+  /** Trades through a STOP, deliberately and briefly. */
+  overrideCoach() {
+    this.overrodeAt = Date.now();
+    this.showToast({
+      kind: 'info',
+      title: 'Override',
+      detail: 'One ticket, then the rule is back',
+    });
+    this.emitSlow();
+  }
+
+  setLimits(next: Partial<CoachLimits>) {
+    this.limits = { ...this.limits, ...next };
+    this.updateCoach();
+    this.queueSave();
+    this.emitSlow();
+  }
+
+  setCoach(on: boolean) {
+    if (on === this.coachOn) return;
+    this.coachOn = on;
+    this.updateCoach();
+    this.queueSave();
+    this.emitSlow();
+  }
+
+  /** Starts the session's book again from where the balance stands now. */
+  resetSession() {
+    this.sessionStart = this.balance;
+    this.betLog = [];
+    this.overrodeAt = 0;
+    this.updateCoach();
+    this.queueSave();
+    this.showToast({ kind: 'info', title: 'New session', detail: 'The book starts here' });
+    this.emitSlow();
+  }
+
+  // =========================================================================
   // the edge hunter
   // =========================================================================
 
@@ -1931,6 +2088,8 @@ export class MarketStore {
         signalKey: this.signalKey,
         goldAggression: this.goldAggression,
         goldRecord: this.goldRecord,
+        limits: this.limits,
+        coachOn: this.coachOn,
         calls: this.calls,
         callModel: this.callModel,
       });

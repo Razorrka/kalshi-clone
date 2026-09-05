@@ -1385,3 +1385,118 @@ describe('the edge hunter', () => {
     expect(store.goldAggression).toBe(0);
   });
 });
+
+describe('the discipline coach', () => {
+  const ROUND = 15 * MINUTE;
+
+  beforeEach(() => {
+    vi.setSystemTime(T0 + 1_000);
+    store = new MarketStore();
+    store.setRoundMs(ROUND);
+    store.start();
+    store.resetSession();
+  });
+
+  it('says nothing about a sensible ticket', () => {
+    run(5_000);
+    const call = store.judge('up', 15);
+    expect(call.verdict).toBe('CLEAR');
+    expect(store.blocked).toBe(false);
+  });
+
+  it('refuses a ticket that is a large slice of the bank', () => {
+    run(5_000);
+    const call = store.judge('up', 400);
+    expect(call.verdict).toBe('STOP');
+    expect(call.headline).toContain('OF YOUR BANK');
+    expect(call.stakeCap).toBe(20);
+  });
+
+  it('logs every ticket and settles it with the round', () => {
+    run(5_000);
+    expect(store.placeBet('up', 10).ok).toBe(true);
+    expect(store.betLog).toHaveLength(1);
+    expect(store.betLog[0].status).toBe('open');
+
+    run(ROUND);
+    expect(store.betLog[0].status === 'won' || store.betLog[0].status === 'lost').toBe(true);
+  });
+
+  it('blocks the buttons after a run of losses, then lets you back', () => {
+    // Three settled losses in a row, the most recent just now.
+    store.betLog = [
+      { stake: 10, at: Date.now() - 1_000, side: 'up', status: 'lost', entryProb: 0.5, multiplier: 1.9, msLeftAtEntry: ROUND },
+      { stake: 10, at: Date.now() - 60_000, side: 'up', status: 'lost', entryProb: 0.5, multiplier: 1.9, msLeftAtEntry: ROUND },
+      { stake: 10, at: Date.now() - 120_000, side: 'up', status: 'lost', entryProb: 0.5, multiplier: 1.9, msLeftAtEntry: ROUND },
+    ];
+    run(1_000);
+    expect(store.blocked).toBe(true);
+    expect(store.cooldownLeft).toBeGreaterThan(0);
+
+    // Serve the break and it steps aside.
+    run(store.limits.cooldownMs);
+    expect(store.blocked).toBe(false);
+  });
+
+  it('lets you trade through it for exactly one ticket', () => {
+    store.betLog = [1, 2, 3].map((i) => ({
+      stake: 10,
+      at: Date.now() - i * 1_000,
+      side: 'up' as const,
+      status: 'lost' as const,
+      entryProb: 0.5,
+      multiplier: 1.9,
+      msLeftAtEntry: ROUND,
+    }));
+    run(1_000);
+    expect(store.blocked).toBe(true);
+
+    store.overrideCoach();
+    expect(store.blocked).toBe(false);
+    expect(store.placeBet('up', 10).ok).toBe(true);
+    // The ticket spends the override — the rule is back immediately.
+    expect(store.blocked).toBe(true);
+  });
+
+  it('calls the day once the drawdown line is crossed', () => {
+    store.setBalance(1_000);
+    store.resetSession();
+    store.setBalance(700);
+    run(1_000);
+    expect(store.blocked).toBe(true);
+    expect(store.coachCall!.headline).toContain('DOWN 30%');
+  });
+
+  it('measures the drawdown from the session, not the all-time balance', () => {
+    store.setBalance(500);
+    store.resetSession();
+    run(1_000);
+    // Down a lot from the start of time, but flat for this session.
+    expect(store.coachCall!.drawdown).toBe(0);
+    expect(store.blocked).toBe(false);
+  });
+
+  it('honours your own limits rather than its defaults', () => {
+    run(5_000);
+    expect(store.judge('up', 30).verdict).toBe('WAIT');
+    store.setLimits({ maxStakePct: 0.1 });
+    expect(store.judge('up', 30).verdict).toBe('CLEAR');
+  });
+
+  it('goes quiet entirely when switched off', () => {
+    store.setBalance(1_000);
+    store.resetSession();
+    store.setBalance(500);
+    store.setCoach(false);
+    run(1_000);
+    expect(store.coachCall).toBeNull();
+    expect(store.blocked).toBe(false);
+  });
+
+  it('never blocks on the size of a ticket you have not typed', () => {
+    // The buttons stay live; the size argument happens in the ticket sheet.
+    store.setLimits({ maxStakePct: 0.001 });
+    run(5_000);
+    expect(store.blocked).toBe(false);
+  });
+});

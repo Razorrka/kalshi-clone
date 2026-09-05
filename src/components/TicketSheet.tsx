@@ -55,6 +55,9 @@ export function TicketSheet() {
     setLimitCents((c) => Math.min(99, Math.max(1, c + delta)));
   };
 
+  // What the coach makes of this exact size, recomputed as it is typed.
+  const verdict = store.coachOn ? store.judge(side, stake) : null;
+
   const submit = () => {
     const result =
       orderType === 'market'
@@ -88,6 +91,20 @@ export function TicketSheet() {
       onClose={() => store.closeSheet()}
       footer={
         <>
+          {/* The verdict belongs here, at the moment the size is chosen —
+              the banner behind the sheet is not where the decision happens. */}
+          {verdict && verdict.verdict !== 'CLEAR' && (
+            <button
+              className={`coach-inline ${verdict.verdict.toLowerCase()}`}
+              onClick={() => store.openSheet('coach')}
+            >
+              <span className="coach-inline-word">
+                {verdict.verdict === 'STOP' ? 'DO NOT' : 'HOLD ON'}
+              </span>
+              <span className="coach-inline-line">{verdict.headline}</span>
+              <span className="coach-inline-action">{verdict.action}</span>
+            </button>
+          )}
           <button
             className={`primary-btn ${side}`}
             disabled={disabled}

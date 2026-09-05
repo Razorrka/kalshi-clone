@@ -25,6 +25,8 @@ import { CallStrip } from './components/CallStrip';
 import { CallButton } from './components/CallButton';
 import { FlipStrip } from './components/FlipStrip';
 import { GoldStrip } from './components/GoldStrip';
+import { CoachBanner } from './components/CoachBanner';
+import { CoachSheet } from './components/CoachSheet';
 import { GoldSheet } from './components/GoldSheet';
 import { FlipSheet } from './components/FlipSheet';
 import { CallsSheet } from './components/CallsSheet';
@@ -64,6 +66,7 @@ export default function App() {
           <GoldStrip />
           <SignalReadout />
           <ControlsRow />
+          <CoachBanner />
           <TradeArea />
           <div className="home-bar" />
         </div>
@@ -79,6 +82,7 @@ export default function App() {
         {store.sheet === 'calls' && <CallsSheet />}
         {store.sheet === 'flip' && <FlipSheet />}
         {store.sheet === 'gold' && <GoldSheet />}
+        {store.sheet === 'coach' && <CoachSheet />}
       </div>
     </div>
   );
