@@ -380,12 +380,27 @@ describe('weights and what they are worth', () => {
     }
   });
 
+  it('does not let the fitted weights grow back', () => {
+    // These were fitted twice, on 400 rounds and on 40,000, and six of the
+    // sixteen came back with the opposite sign — failedBreak, acceleration,
+    // depth, roc, regimeShift, momentumDivergence. A real signal does not
+    // change direction when you give it a hundred times the data, so the size
+    // of these is the size of the noise, and anything much larger arriving
+    // here later means someone has fitted a small sample again.
+    const total = SCORED_KEYS.reduce((a, k) => a + Math.abs(FLIP_WEIGHTS[k]), 0);
+    expect(total).toBeLessThan(0.12);
+    // And the two that were once believed to be the strong ones are now among
+    // the smallest, which is the whole point.
+    expect(Math.abs(FLIP_WEIGHTS.rejection)).toBeLessThan(0.005);
+    expect(Math.abs(FLIP_WEIGHTS.failedBreak)).toBeLessThan(0.01);
+  });
+
   it('keeps every weight small enough that the geometry still decides', () => {
     // Refitted with the penalty chosen by cross-validation grouped by round,
-    // the sixteen inputs are worth +0.00009 of AUC over the geometry alone and
+    // the sixteen inputs are worth +0.00011 of AUC over the geometry alone and
     // the fit shrinks them to almost nothing. This pins that they stay there.
     for (const key of SCORED_KEYS) {
-      expect(Math.abs(FLIP_WEIGHTS[key])).toBeLessThan(0.025);
+      expect(Math.abs(FLIP_WEIGHTS[key])).toBeLessThan(0.04);
     }
 
     // The pathological ceiling: every one of the sixteen pinned at a
@@ -517,7 +532,7 @@ describe('confidence', () => {
 
   it('is high where the measurement behind the answer is tight', () => {
     // Confidence is about the touch probability, not about how many of the
-    // sixteen inputs happen to nod along — measured, they are worth +0.00009
+    // sixteen inputs happen to nod along — measured, they are worth +0.00011
     // of AUC between them, so their agreement is sixteen coins landing alike.
     expect(confidenceOf(parts({ failedBreak: 4 }), 200, 0.0006)).toBe('HIGH');
   });

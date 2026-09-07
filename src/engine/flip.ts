@@ -488,14 +488,22 @@ export class FlipRolling {
  * weights scored AUC 0.893 against the geometry's own 0.918, so they had to be
  * shrunk to a tenth to stop them doing harm.
  *
- * Refitted properly — L2-regularised logistic regression with the measured
- * touch probability as a fixed offset, so a feature can only earn weight for
- * what the geometry does not already say, and the penalty chosen by
- * cross-validation grouped BY ROUND rather than by sample — the answer is
- * blunt. Held out, the sixteen inputs together are worth +0.00009 of AUC over
- * the geometry alone, and the cross-validation picks a penalty so heavy that
- * the largest surviving weight is 0.02. Several of the old signs were simply
- * wrong: `rejection` was fitted at +0.493 and comes back negative.
+ * Refitted properly — L2-regularised logistic regression with the touch
+ * probability as a fixed offset, so a feature can only earn weight for what
+ * the geometry does not already say, and the penalty chosen by
+ * cross-validation grouped BY ROUND rather than by sample. Over 3,560,000
+ * samples from 40,000 rounds, held out, the sixteen inputs together are worth
+ * +0.00011 of AUC over the geometry alone. The penalty makes almost no
+ * difference: every setting from 1e5 down to 1 lands on the same held-out
+ * score, which is what a regression does when there is nothing to regularise.
+ *
+ * The sharper evidence is that the weights do not replicate. Fitted the same
+ * way on 400 rounds and again on 40,000, SIX of the sixteen come back with the
+ * opposite sign — `failedBreak`, `acceleration`, `depth`, `roc`,
+ * `regimeShift`, `momentumDivergence`. A real signal does not change direction
+ * when you give it a hundred times the data. These are the 40,000-round
+ * numbers because they are the better estimate, not because they are
+ * trustworthy.
  *
  * So the honest weights are these, and the honest reading of the flip
  * detector is that the geometry is the detector. The sixteen inputs are worth
@@ -506,22 +514,22 @@ export class FlipRolling {
 export const WEIGHT_SHRINK = 1;
 
 const FITTED = {
-  volatility: -0.0201,
-  velocity: -0.0155,
-  bookImbalance: 0.0135,
-  liquidityPull: 0.0103,
-  roc: -0.0093,
-  acceleration: -0.0065,
-  tradeImbalance: 0.0045,
-  rejection: -0.0037,
-  trajectory: -0.0036,
-  volumeAccel: 0.0034,
-  depth: 0.0018,
-  regimeShift: 0.0018,
-  failedBreak: -0.001,
-  momentumDivergence: -0.0008,
-  largeOrders: 0.0004,
-  spread: -0.0002,
+  velocity: -0.0321,
+  liquidityPull: 0.0236,
+  bookImbalance: 0.0106,
+  failedBreak: 0.0044,
+  spread: -0.0032,
+  trajectory: -0.0031,
+  acceleration: 0.0031,
+  largeOrders: 0.003,
+  depth: -0.0028,
+  roc: 0.0026,
+  volatility: -0.0022,
+  regimeShift: -0.0016,
+  tradeImbalance: 0.0015,
+  volumeAccel: 0.0008,
+  rejection: -0.0007,
+  momentumDivergence: 0.0006,
 } as const;
 
 export const FLIP_WEIGHTS: Record<string, number> = Object.fromEntries(
@@ -694,7 +702,7 @@ export function reasonsFor(
   const out: FlipReason[] = [];
   // Ranked by how far the input itself has moved, not by how much it shifts
   // the odds. The weights are tiny — measured, the sixteen inputs together are
-  // worth +0.00009 of AUC over the geometry — so ranking by their push would
+  // worth +0.00011 of AUC over the geometry — so ranking by their push would
   // leave the strip with nothing to say while the tape was plainly doing
   // something. What a reason claims is "this is happening", and `backed` marks
   // the two that also measurably predict a flip.
@@ -747,7 +755,7 @@ export function confidenceOf(
   //
   // It used to count how many of the sixteen features agreed with each other,
   // which reads well and means nothing: measured against the geometry they are
-  // worth +0.00009 of AUC between them, so sixteen of them nodding along is
+  // worth +0.00011 of AUC between them, so sixteen of them nodding along is
   // sixteen coin flips landing the same way. What is actually uncertain here
   // is the touch probability itself, and the measurement says exactly where —
   // its fit is within a tenth of a point over most of the grid and drifts to

@@ -168,14 +168,26 @@ export function FlipSheet() {
         they came back as nothing.</strong>{' '}
         The old ones were fitted on 260 rounds — and every sample inside a round
         rides the same price path, so that is an effective sample of about 260
-        for sixteen inputs, which is enough to fit noise. Refitted with the
-        penalty chosen by cross-validation grouped <em>by round</em>, the
-        sixteen together are worth +0.00009 of AUC over the geometry alone, and
-        several of the old signs were simply backwards: <em>price rejection</em>{' '}
-        was fitted at +0.49 and comes back negative. They now ship at their
-        fitted size, which is almost zero, and the reasons above are ranked by
-        how far each input has actually moved rather than by a weight that does
-        not mean anything. The pattern match is drawing on{' '}
+        for sixteen inputs, which is enough to fit noise. Refitted over
+        3,560,000 samples from 40,000 rounds, with the penalty chosen by
+        cross-validation grouped <em>by round</em>, the sixteen together are
+        worth <span className="tnum">+0.00011</span> of AUC over the geometry
+        alone. Every penalty from 100,000 down to 1 gives the same held-out
+        score, which is what a regression does when there is nothing to
+        regularise.
+      </div>
+      <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>And they do not
+        replicate.</strong>{' '}
+        Fitted the same way on 400 rounds and again on 40,000, six of the
+        sixteen come back with the <em>opposite sign</em> — failed breakout,
+        acceleration, depth, rate of change, regime shift and momentum
+        divergence. A real signal does not change direction when you give it a
+        hundred times the data. The numbers shipped are the 40,000-round ones
+        because they are the better estimate, not because they can be trusted,
+        and the reasons above are ranked by how far each input has actually
+        moved rather than by a weight that does not mean anything. The pattern
+        match is drawing on{' '}
         <span className="tnum">{store.flipMemorySize}</span> resolved setups.
       </div>
       <div className="note">
