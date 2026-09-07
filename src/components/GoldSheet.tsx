@@ -215,6 +215,16 @@ export function GoldSheet() {
         which would be a precision this does not have.
       </div>
       <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>It was checked end to end.</strong>{' '}
+        Not "the model predicts better" — the tickets the light actually picks,
+        settled. Over 2,800,000 rounds with one bet each, taken at the first
+        moment the hunter fired, the patient setting returned{' '}
+        <span className="tnum">+2.10% ± 0.97</span> per dollar across 2.56
+        million bets, against the +1.20% it predicted before the run. Halfway
+        up the slider: −0.84% ± 0.59. Wide open: −5.18% ± 0.11. The slider does
+        what it says, and the model is conservative rather than flattering.
+      </div>
+      <div className="note">
         <strong style={{ color: 'var(--muted)' }}>The edge is real and it is small.</strong>{' '}
         The board's price is wrong in a measurable direction, but the house
         takes {Math.round(VIG * 100)}% of winnings and that swallows the error

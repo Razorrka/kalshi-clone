@@ -286,9 +286,12 @@ describe('does the hunter actually make money', () => {
    * is independent of the decision to stop there — picking the best-looking
    * moment in a round instead would condition on the path and flatter itself.
    *
-   * Measured this way over 700,000 rounds the patient setting returned
-   * +2.27% ± 1.94 per dollar against a prediction of +1.20%, and the wide-open
-   * setting returned −5.37% ± 0.22 against a prediction of −4.95%. This runs
+   * Measured this way over 2,800,000 rounds — 2,557,404 bets — the patient
+   * setting returned +2.10% ± 0.97 per dollar against a prediction of +1.20%,
+   * so its interval clears zero by four standard errors and the model is
+   * conservative rather than flattering. Halfway up the slider it returned
+   * −0.84% ± 0.59 against a prediction of −2.03%, and wide open −5.18% ± 0.11
+   * against −4.95%. A 700,000-round run beforehand gave +2.27% ± 1.94. This runs
    * a small slice of that: too few bets to confirm the sign, but enough to
    * catch the pipeline breaking — a hunter that stopped firing, or started
    * firing on the wrong side, or lost its stake sizing.

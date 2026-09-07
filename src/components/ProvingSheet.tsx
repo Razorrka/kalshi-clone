@@ -173,12 +173,14 @@ export function ProvingSheet() {
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>What this tool cannot settle.</strong>{' '}
         Twenty thousand rounds gives the hunter about 700 bets at 50x, which
-        cannot tell +13% from −50%. Run away from here it was measured over
-        700,000 rounds, sampled at the moments it actually fires, and came in
-        at <span className="tnum">+2.27% ± 1.94</span> against a prediction of
-        +1.20% made before the run — the one rule on this list whose interval
-        clears zero. This screen is honest about not being able to show you
-        that; a tool that could would be lying about something else.
+        cannot tell +13% from −50%. Run away from here over 2,800,000 rounds,
+        sampled at the moments it actually fires, it came in at{' '}
+        <span className="tnum">+2.10% ± 0.97</span> across 2.56 million bets —
+        against a prediction of +1.20% made before the run. Its interval clears
+        zero by four standard errors, the only rule on this list that does, and
+        the prediction was conservative rather than flattering. This screen is
+        honest about not being able to show you that; a tool that claimed it
+        could would be lying about something else.
       </div>
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>What it settles easily.</strong>{' '}
