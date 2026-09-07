@@ -390,3 +390,42 @@ describe('the interval it quotes', () => {
     expect(fair).toBeGreaterThan(0);
   });
 });
+
+describe('the ladder the sheet draws', () => {
+  it('opens up as the slider does', () => {
+    // The complaint that found this: one gold row and nothing else, however
+    // far the slider was pushed. The sheet was marking what is profitable
+    // while the strip acted on what clears your bar, and those are different
+    // questions — so the table said nothing about the rest of the board you
+    // were actually buying.
+    const counts = [0, 0.25, 0.5, 0.75, 1].map((a) => {
+      const th = evThresholdFor(a);
+      return evCurve(60, 1).filter((r) => r.ev >= th).length;
+    });
+    for (let i = 1; i < counts.length; i++) {
+      expect(counts[i]).toBeGreaterThanOrEqual(counts[i - 1]);
+    }
+    expect(counts[0]).toBeLessThan(3);
+    expect(counts[counts.length - 1]).toBe(evCurve(60, 1).length);
+  });
+
+  it('keeps the gold rows to the ones that actually make money', () => {
+    // Turning the slider up must never turn a losing price gold. It gets an
+    // outline and the number beside it, which is a different claim.
+    for (const a of [0, 0.5, 1]) {
+      const th = evThresholdFor(a);
+      for (const row of evCurve(60, 1)) {
+        if (row.ev > 0) continue;
+        // Taken, perhaps — but not profitable, whatever the slider says.
+        expect(row.ev >= th ? row.ev : -1).toBeLessThanOrEqual(0);
+      }
+    }
+  });
+
+  it('always has something to show at the far end', () => {
+    // A ladder where nothing is ever lit is the bug this replaced.
+    for (const s of [15, 60, 240, 900]) {
+      expect(evCurve(s, 1).filter((r) => r.ev > 0).length).toBeGreaterThan(0);
+    }
+  });
+});

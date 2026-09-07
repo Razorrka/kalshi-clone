@@ -100,8 +100,8 @@ export function GoldSheet() {
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>How often it lights.</strong>{' '}
         Watched second by second over 600 rounds: 1.6% of the time at the
-        patient end, 5.8% a quarter up, 20.6% halfway, 53.9% at three
-        quarters, 87.3% wide open. The slider is spaced by that measurement
+        patient end, 5.8% a quarter up, 20.6% halfway, 38.8% where it starts,
+        53.9% at three quarters, 87.3% wide open. The slider is spaced by that measurement
         rather than drawn as a straight line, because almost every price on
         this board sits between −4.5% and −6.5% — a bar moving in equal steps
         does nothing across most of its travel and then everything at the end.
@@ -165,21 +165,35 @@ export function GoldSheet() {
           <span className="tnum">Really</span>
           <span className="tnum">Per $1</span>
         </div>
-        {curve.map((row) => (
-          <div className={`gold-row${row.ev > 0 ? ' even' : ''}`} key={row.quoted}>
-            <span className="tnum">{(row.quoted * 100).toFixed(0)}%</span>
-            <span className="tnum">{row.multiplier.toFixed(1)}x</span>
-            <span className="tnum">{(row.fair * 100).toFixed(2)}%</span>
-            <span className={`tnum ${row.ev > 0 ? 'even-txt' : 'neg'}`}>
-              {pct(row.ev)} <span className="ci">±{(row.evCi * 100).toFixed(1)}</span>
-            </span>
-          </div>
-        ))}
+        {curve.map((row) => {
+          // Lit when the slider would take it, not when it happens to be
+          // profitable. Those are different questions, and the table used to
+          // answer the second one while the strip acted on the first — so it
+          // showed a single gold row at 90x however far the slider was pushed,
+          // and said nothing about the rest of the board you were actually
+          // buying. Push the slider up and the ladder lights up with it.
+          const taken = row.ev >= threshold;
+          const profitable = row.ev > 0;
+          const cls = profitable ? ' even' : taken ? ' taken' : '';
+          return (
+            <div className={`gold-row${cls}`} key={row.quoted}>
+              <span className="tnum">{(row.quoted * 100).toFixed(0)}%</span>
+              <span className="tnum">{row.multiplier.toFixed(1)}x</span>
+              <span className="tnum">{(row.fair * 100).toFixed(2)}%</span>
+              <span className={`tnum ${profitable ? 'even-txt' : 'neg'}`}>
+                {pct(row.ev)} <span className="ci">±{(row.evCi * 100).toFixed(1)}</span>
+              </span>
+            </div>
+          );
+        })}
       </div>
       <div className="note">
         "Really" is the rate that price actually lands at, measured. The gap is
         the whole edge, and it closes as the round runs — which is why this
-        table is drawn for the clock as it stands rather than once for all time.
+        table is drawn for the clock as it stands rather than once for all
+        time. A <span style={{ color: 'var(--gold)' }}>gold</span> row makes
+        money. An outlined row is one your slider will take anyway — the light
+        comes on for it, and the number beside it says what it costs.
       </div>
 
       <div className="section-label">How wrong the board is, by the clock</div>

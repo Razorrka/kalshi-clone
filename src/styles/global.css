@@ -2404,7 +2404,27 @@ input {
 }
 .gold-strip.lit.prime {
   border-color: rgba(245, 196, 81, 0.85);
-  box-shadow: 0 0 14px rgba(245, 196, 81, 0.16);
+  /* Only PRIME pulses — the one grade where the measured interval clears zero.
+     A steady glow for everything else, so the movement means something rather
+     than being decoration the eye stops seeing. */
+  animation: gold-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes gold-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 6px rgba(245, 196, 81, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(245, 196, 81, 0.42);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gold-strip.lit.prime {
+    animation: none;
+    box-shadow: 0 0 14px rgba(245, 196, 81, 0.16);
+  }
 }
 .gold-strip .dim {
   color: var(--muted-2);
@@ -2568,6 +2588,12 @@ input {
 }
 .gold-row.even {
   border: 1px solid rgba(245, 196, 81, 0.3);
+}
+
+/* Your slider takes this one, and it is not a winner. Outlined rather than
+   gold, because the two are different claims. */
+.gold-row.taken {
+  border: 1px solid rgba(255, 255, 255, 0.13);
 }
 .gold-row .neg {
   color: var(--down);

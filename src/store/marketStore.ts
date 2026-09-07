@@ -168,7 +168,15 @@ export class MarketStore {
   /** UT Bot "key value": how tightly the stop trails. Lower = more signals. */
   signalKey = SIGNAL_RULES.keyValue;
   /** How loose the edge hunter is, 0 (patient) to 1 (takes anything in band). */
-  goldAggression = 0.5;
+  /**
+   * Where the edge hunter's slider starts.
+   *
+   * At a half it lights about a fifth of the time, which reads as broken
+   * rather than as picky. Two thirds puts it near two fifths, which is a
+   * signal you notice. It is a saved setting, so this only decides where a
+   * fresh install begins.
+   */
+  goldAggression = 0.67;
   feedStatus: FeedStatus = 'idle';
   feedDetail = '';
 
