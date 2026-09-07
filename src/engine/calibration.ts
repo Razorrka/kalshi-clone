@@ -61,6 +61,13 @@ import { clamp, invNormCdf, normCdf } from '../lib/math';
  * every other sample in its cell, taken from a chain stepped at the app's own
  * 60ms tick — a coarser step would have inflated the very quantity being
  * measured, since the engine's jump variance is proportional to its step.
+ *
+ * One limit worth stating: the grid stops at fifteen minutes because that is
+ * the round this app is a clone of. On the hour-long round it holds the
+ * fifteen-minute row rather than extrapolating. k turns back upward past four
+ * minutes as volatility drift takes over from the microstructure bounce, so
+ * holding it flat probably understates the correction there — which errs
+ * toward quoting less edge than there is, and is the direction to err in.
  */
 
 // Generated from the measurement; see the module comment for how.
