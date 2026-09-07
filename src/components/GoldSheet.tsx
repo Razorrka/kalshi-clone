@@ -98,6 +98,15 @@ export function GoldSheet() {
         </div>
       </div>
       <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>How often it lights.</strong>{' '}
+        Watched second by second over 600 rounds: 1.6% of the time at the
+        patient end, 5.2% halfway, 45% wide open. The patient setting spends
+        6.3% of the final minute lit against 1.6% of a round overall — four
+        times as often, because that is where the board is wrong. Wide open
+        does the opposite, 25.8% late against 45% overall, because it is taking
+        near coin flips and those are everywhere.
+      </div>
+      <div className="note">
         The number beside the slider is the worst expected value it will
         accept. At the patient end it is positive, so the light only comes on
         for prices the measurement says actually make money — which is a rare
