@@ -1,4 +1,5 @@
 import { PriceEngine, VOL_PRESETS, type VolPreset } from '../engine/priceEngine';
+import { liveAnnualVol } from '../engine/vol';
 import { fairProbability, volRatioOf } from '../engine/calibration';
 import { LiveFeed } from '../engine/liveFeed';
 import { OrderBookSim, type OrderBookSnapshot } from '../engine/orderBook';
@@ -14,7 +15,7 @@ import {
   probUp,
   sideCents,
 } from '../engine/odds';
-import { SECONDS_PER_YEAR, clamp } from '../lib/math';
+import { clamp } from '../lib/math';
 import { DEFAULT_ROUND_MS, makeRound, roundBounds, settleRound } from '../engine/rounds';
 import type {
   Candle,
@@ -463,7 +464,7 @@ export class MarketStore {
       if (this.livePrice > 0) this.setPrice(this.livePrice);
       if (now - this.volEstimateAt > 5_000) {
         this.volEstimateAt = now;
-        const est = this.estimateAnnualVol(now);
+        const est = liveAnnualVol(this.series, now);
         // Blend, so a refreshed estimate nudges the odds instead of jumping them.
         if (est !== null) this.annualVol = this.annualVol * 0.7 + est * 0.3;
       }
@@ -569,36 +570,6 @@ export class MarketStore {
    * time, so spreading one minute's move across twelve grid steps recovers
    * the same per-step variance.
    */
-  private estimateAnnualVol(now: number): number | null {
-    const s = this.series;
-    if (s.length < 8) return null;
-    const stepMs = 5_000;
-    const from = Math.max(s[0].t, now - 10 * 60_000);
-    const steps = Math.floor((now - from) / stepMs);
-    if (steps < 12) return null;
-
-    let sum = 0;
-    let sumSq = 0;
-    let count = 0;
-    let prev = this.priceAt(from);
-    for (let i = 1; i <= steps; i++) {
-      const p = this.priceAt(from + i * stepMs);
-      if (p > 0 && prev > 0) {
-        const r = Math.log(p / prev);
-        sum += r;
-        sumSq += r * r;
-        count += 1;
-      }
-      prev = p;
-    }
-    if (count < 12) return null;
-
-    const mean = sum / count;
-    const variance = Math.max(0, sumSq / count - mean * mean);
-    const annual = Math.sqrt(variance) * Math.sqrt(SECONDS_PER_YEAR / (stepMs / 1000));
-    return clamp(annual, 0.05, 3);
-  }
-
   private recompute(now: number) {
     const msLeft = Math.max(0, this.round.endsAt - now);
     const pUp = probUp(this.price, this.round.strike, this.annualVol, msLeft);
