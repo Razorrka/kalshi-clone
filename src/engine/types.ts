@@ -135,7 +135,15 @@ export const CANDLE_INTERVALS = [
   { ms: 15 * 60_000, label: '15M' },
 ] as const;
 
-export const DEFAULT_CANDLE_MS = 5 * 60_000;
+/**
+ * A minute a candle.
+ *
+ * At five, the twenty-six bars that fit covered over two hours and the
+ * fifteen-minute round being traded was the last three of them — a chart
+ * mostly of history that had already settled. At one, the round fills most of
+ * the screen and the price scale is set by the movement that matters.
+ */
+export const DEFAULT_CANDLE_MS = 60_000;
 
 export type Timeframe = 'live' | '5m' | '15m' | '1h';
 

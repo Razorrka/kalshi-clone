@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_CANDLE_MS } from './types';
 import { aggregateBars, toCandles } from './candles';
 import type { Candle, Tick } from './types';
 
@@ -230,5 +231,22 @@ describe('aggregateBars', () => {
     expect(aggregateBars(input, 5 * MIN, 6, T0 + 299 * MIN).length).toBeLessThanOrEqual(6);
     expect(aggregateBars([], 5 * MIN, 10)).toEqual([]);
     expect(aggregateBars(input, 0, 10)).toEqual([]);
+  });
+});
+
+describe('the default candle length', () => {
+  it('fits the round being traded, not hours of settled history', () => {
+    // About 26 candles fit across a phone. At five minutes each that covered
+    // over two hours, so the fifteen-minute round actually being traded was
+    // the last three bars and the price scale was set by movement that had
+    // already finished. At one minute the round fills most of the frame.
+    const onScreen = 26;
+    const roundMs = 15 * 60_000;
+    const covered = onScreen * DEFAULT_CANDLE_MS;
+    expect(covered).toBeGreaterThanOrEqual(roundMs);
+    // And not so much more that the round is a sliver of it.
+    expect(covered).toBeLessThan(roundMs * 2.5);
+    // The round itself is most of what you see.
+    expect(roundMs / DEFAULT_CANDLE_MS).toBeGreaterThan(onScreen * 0.5);
   });
 });

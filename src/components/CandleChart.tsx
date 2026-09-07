@@ -3,11 +3,13 @@ import { market } from '../store/marketStore';
 import { aggregateBars } from '../engine/candles';
 import { SIGNAL_RULES, computeSignals } from '../engine/signals';
 import { fmtAxis, fmtUsd } from '../lib/format';
-import { niceStep } from '../lib/math';
+import { clamp, niceStep } from '../lib/math';
 
 const GUTTER = 94;
-const PAD_TOP = 34;
-const PAD_BOTTOM = 24;
+/** Room for the "5M CANDLES" caption above the plot, and no more. */
+const PAD_TOP = 26;
+/** Nothing is drawn below the plot, so this is only breathing room. */
+const PAD_BOTTOM = 10;
 const SLOT = 11; // one candle plus its gap
 /** Bars fed to the indicators, well past what fits on screen. */
 const SIGNAL_LOOKBACK = 160;
@@ -89,7 +91,11 @@ export function CandleChart() {
       if (strike > hi && strike - hi < span * 0.28) hi = strike;
       if (strike < lo && lo - strike < span * 0.28) lo = strike;
       span = hi - lo;
-      const pad = span * 0.14;
+      // Headroom above the highest wick and below the lowest, so neither
+      // touches the edge. This was 14% each way, which spent more than a
+      // quarter of the plot on empty air and left the candles occupying about
+      // half the box they were given.
+      const pad = span * 0.07;
       lo -= pad;
       hi += pad;
       span = hi - lo;
@@ -106,14 +112,51 @@ export function CandleChart() {
       const pinnedUp = strikeY < plotTop;
       const pinnedDown = strikeY > plotBottom;
       const ty = pinnedUp ? plotTop : pinnedDown ? plotBottom : strikeY;
+      const font0 = getComputedStyle(document.body).fontFamily;
       ctx.save();
+      ctx.font = '800 10px ' + font0;
+      ctx.letterSpacing = '1.2px';
+      const tLabel = 'TARGET';
+      const tW = ctx.measureText(tLabel).width;
+      // A chevron when the target has run off the frame, so a line sitting flat
+      // against the top edge reads as "the target is up there" rather than as
+      // an artefact of the drawing.
+      const chev = pinnedUp || pinnedDown ? 13 : 0;
+      const tX = 14;
+      const gapEnd = tX + tW + chev + 6;
+
       ctx.strokeStyle = 'rgba(255,255,255,0.22)';
       ctx.lineWidth = 1.2;
       ctx.setLineDash([3, 4.5]);
       ctx.beginPath();
-      ctx.moveTo(0, ty);
+      ctx.moveTo(tX - 6, ty);
+      ctx.lineTo(tX - 6, ty);
+      ctx.moveTo(gapEnd, ty);
       ctx.lineTo(width, ty);
+      ctx.moveTo(0, ty);
+      ctx.lineTo(tX - 6, ty);
       ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = '#aab1bb';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(tLabel, tX, ty);
+      ctx.letterSpacing = '0px';
+
+      if (chev) {
+        const cx = tX + tW + 6;
+        const shoulderY = ty + (pinnedUp ? 2 : -2);
+        const tipY = ty + (pinnedUp ? -3 : 3);
+        ctx.strokeStyle = '#aab1bb';
+        ctx.lineWidth = 1.6;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(cx, shoulderY);
+        ctx.lineTo(cx + 3.5, tipY);
+        ctx.lineTo(cx + 7, shoulderY);
+        ctx.stroke();
+      }
       ctx.restore();
 
       // ---- price axis ------------------------------------------------------
@@ -259,8 +302,15 @@ export function CandleChart() {
         const boxW = tw + 11;
         const boxH = 16;
         // Clear of the bar it refers to: under the low for a buy, over the
-        // high for a sell, so the label never covers the price action.
-        const boxY = buy ? yOf(bar.low) + 7 : yOf(bar.high) - 7 - boxH;
+        // high for a sell, so the label never covers the price action. Kept
+        // inside the canvas in both directions — the horizontal clamp was
+        // here, the vertical one was not, so a buy under a low near the floor
+        // was drawn half off the bottom edge.
+        const boxY = clamp(
+          buy ? yOf(bar.low) + 7 : yOf(bar.high) - 7 - boxH,
+          2,
+          height - boxH - 2,
+        );
         const boxX = Math.max(2, Math.min(plotRight - boxW - 2, x - boxW / 2));
 
         ctx.fillStyle = colour;
