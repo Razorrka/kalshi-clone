@@ -122,6 +122,32 @@ input {
   flex-direction: column;
 }
 
+/* The market column between the top bars and the trade buttons. It scrolls
+   so that adding a strip can never push the buy and sell buttons off the
+   bottom of a short phone. */
+.scroller {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  scrollbar-width: none;
+}
+
+.scroller::-webkit-scrollbar {
+  display: none;
+}
+
+/* Pinned: whatever else is on screen, the pick is always reachable. */
+.screen-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
 /* ------------------------------------------------------------ statusbar */
 
 .statusbar {

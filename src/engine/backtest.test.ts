@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RULES, backtest, rsi, summarise } from './backtest';
+import { RULES, backtest, backtestAll, rsi, summarise } from './backtest';
 
 const won = (multiplier: number) => ({ won: true, multiplier });
 const lost = (multiplier: number) => ({ won: false, multiplier });
@@ -84,13 +84,25 @@ describe('the rules on offer', () => {
     }
   });
 
-  it('runs every one of them without falling over', () => {
-    for (const r of RULES) {
-      const res = backtest(r.rule, r.name, 200);
+  it('runs every one of them without falling over', { timeout: 60_000 }, () => {
+    // One pass over the tape scoring every rule, which is both how the sheet
+    // runs it and eleven times less work than a pass each.
+    const all = backtestAll(RULES.map((r) => ({ name: r.name, rule: r.rule })), 200);
+    expect(all).toHaveLength(RULES.length);
+    for (const res of all) {
       expect(Number.isFinite(res.ev)).toBe(true);
       expect(Number.isFinite(res.winRate)).toBe(true);
       expect(res.bets).toBeLessThanOrEqual(200);
     }
+  });
+
+  it('gives a rule the same answer whether run alone or alongside the others', () => {
+    // Sharing one tape between rules must not change what any of them scores,
+    // or the pairing would be buying speed with correctness.
+    const together = backtestAll(RULES.map((r) => ({ name: r.name, rule: r.rule })), 150, 77);
+    const alone = backtest(RULES[1].rule, RULES[1].name, 150, 77);
+    expect(together[1].ev).toBe(alone.ev);
+    expect(together[1].bets).toBe(alone.bets);
   });
 
   it('is reproducible from the same seed and different from another', () => {
@@ -106,7 +118,10 @@ describe('what a big sample does to a small edge', () => {
    * the clearest case: a three-quarters win rate that loses money, and an
    * interval that only says so once the sample is big enough.
    */
-  it('shows a 75% win rate losing money once the interval tightens', () => {
+  // Slow on purpose: the engine runs at the app's 60ms tick, so 6,000 rounds
+  // is 90 million steps. Coarsening it to go faster is exactly the mistake
+  // this file exists to catch.
+  it('shows a 75% win rate losing money once the interval tightens', { timeout: 120_000 }, () => {
     const rule = RULES.find((r) => r.key === 'favourite')!.rule;
     const big = backtest(rule, 'favourite', 6_000, 4_242);
     expect(big.winRate).toBeGreaterThan(0.65);

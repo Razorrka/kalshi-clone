@@ -47,29 +47,36 @@ export default function App() {
         <div className="screen">
           <StatusBar />
           <TopBar />
-          <MarketHeader />
-          <PriceStrip />
-          <ViewTabs />
-          <div className="chart-wrap">
-            {store.chartView === 'line' && (
-              <>
-                <PriceChart />
-                <WinTape />
-              </>
-            )}
-            {store.chartView === 'candles' && <CandleChart />}
-            {store.chartView === 'positions' && <PositionsPanel />}
-            <ResultToast />
+          {/* Everything between the bars scrolls. The strips grew past what a
+              short phone can show, and a trade button below the fold is worse
+              than no trade button. */}
+          <div className="scroller">
+            <MarketHeader />
+            <PriceStrip />
+            <ViewTabs />
+            <div className="chart-wrap">
+              {store.chartView === 'line' && (
+                <>
+                  <PriceChart />
+                  <WinTape />
+                </>
+              )}
+              {store.chartView === 'candles' && <CandleChart />}
+              {store.chartView === 'positions' && <PositionsPanel />}
+              <ResultToast />
+            </div>
+            <CallStrip />
+            <CallButton />
+            <FlipStrip />
+            <GoldStrip />
+            <SignalReadout />
+            <ControlsRow />
           </div>
-          <CallStrip />
-          <CallButton />
-          <FlipStrip />
-          <GoldStrip />
-          <SignalReadout />
-          <ControlsRow />
-          <CoachBanner />
-          <TradeArea />
-          <div className="home-bar" />
+          <div className="screen-foot">
+            <CoachBanner />
+            <TradeArea />
+            <div className="home-bar" />
+          </div>
         </div>
 
         {store.sheet === 'book' && <OrderBookSheet />}

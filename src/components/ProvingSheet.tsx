@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMarket } from '../store/useMarket';
 import { Sheet } from './Sheet';
-import { RULES, backtest, type StrategyResult } from '../engine/backtest';
+import { RULES, type StrategyResult } from '../engine/backtest';
+import type { BacktestRequest, BacktestResponse } from '../engine/backtestWorker';
 
 const SIZES = [
   { rounds: 1_000, label: '1k' },
@@ -30,15 +31,39 @@ export function ProvingSheet() {
   const store = useMarket();
   const [rounds, setRounds] = useState(5_000);
   const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<StrategyResult[] | null>(null);
+  const worker = useRef<Worker | null>(null);
+
+  // The tape runs at the app's own 60ms tick, so 20,000 rounds is 300 million
+  // steps. That belongs on another thread.
+  useEffect(() => {
+    const w = new Worker(new URL('../engine/backtestWorker.ts', import.meta.url), {
+      type: 'module',
+    });
+    w.onmessage = (e: MessageEvent<BacktestResponse>) => {
+      const msg = e.data;
+      if (msg.kind === 'progress') setProgress(msg.done / msg.total);
+      else if (msg.kind === 'done') {
+        setResults(msg.results);
+        setRunning(false);
+      } else {
+        setRunning(false);
+      }
+    };
+    worker.current = w;
+    return () => {
+      w.terminate();
+      worker.current = null;
+    };
+  }, []);
 
   const run = () => {
+    if (!worker.current) return;
     setRunning(true);
-    // Yield once so the button can paint its running state before the work.
-    setTimeout(() => {
-      setResults(RULES.map((r) => backtest(r.rule, r.name, rounds, 991)));
-      setRunning(false);
-    }, 30);
+    setProgress(0);
+    const req: BacktestRequest = { rounds, seedBase: 991 };
+    worker.current.postMessage(req);
   };
 
   const control = results?.find((r) => r.name.startsWith('Coin flip'));
@@ -50,7 +75,9 @@ export function ProvingSheet() {
       onClose={() => store.closeSheet()}
       footer={
         <button className="primary-btn" disabled={running} onClick={run}>
-          {running ? 'Running…' : `Test every rule over ${rounds.toLocaleString()} rounds`}
+          {running
+            ? `Running… ${Math.round(progress * 100)}%`
+            : `Test every rule over ${rounds.toLocaleString()} rounds`}
         </button>
       }
     >

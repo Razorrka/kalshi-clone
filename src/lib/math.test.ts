@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clamp, erf, niceStep, normCdf } from './math';
+import { clamp, erf, invNormCdf, niceStep, normCdf } from './math';
 
 describe('normCdf', () => {
   it('matches known values of the standard normal', () => {
@@ -64,5 +64,34 @@ describe('clamp', () => {
     expect(clamp(5, 0, 10)).toBe(5);
     expect(clamp(-1, 0, 10)).toBe(0);
     expect(clamp(11, 0, 10)).toBe(10);
+  });
+});
+
+describe('invNormCdf', () => {
+  it('matches the quantiles everyone knows', () => {
+    expect(invNormCdf(0.975)).toBeCloseTo(1.959964, 5);
+    expect(invNormCdf(0.05)).toBeCloseTo(-1.644854, 5);
+    expect(invNormCdf(0.99)).toBeCloseTo(2.326348, 5);
+    expect(invNormCdf(0.5)).toBeCloseTo(0, 8);
+  });
+
+  it('round-trips through normCdf', () => {
+    // This is the property the odds work actually needs: read a quoted price
+    // back into a distance, and it has to come back as the same price.
+    for (const p of [1e-6, 1e-4, 0.005, 0.01, 0.02425, 0.05, 0.2, 0.5, 0.8, 0.99, 0.9999]) {
+      expect(normCdf(invNormCdf(p))).toBeCloseTo(p, 8);
+    }
+  });
+
+  it('is antisymmetric', () => {
+    for (const p of [0.001, 0.02, 0.1, 0.3, 0.45]) {
+      expect(invNormCdf(p)).toBeCloseTo(-invNormCdf(1 - p), 8);
+    }
+  });
+
+  it('handles the ends without returning a number that is not one', () => {
+    expect(invNormCdf(0)).toBe(-Infinity);
+    expect(invNormCdf(1)).toBe(Infinity);
+    expect(Number.isFinite(invNormCdf(1e-300))).toBe(true);
   });
 });

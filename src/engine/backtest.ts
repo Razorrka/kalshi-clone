@@ -50,7 +50,37 @@ export interface StrategyResult {
 }
 
 const ROUND_MS = 15 * 60_000;
-const STEP_MS = 2_000;
+/**
+ * How finely the tape is stepped.
+ *
+ * This is not a free choice, and it has to be the app's own 60ms tick.
+ *
+ * The engine adds at most one jump per step, of a size fixed relative to that
+ * step. So the variance jumps contribute over a second is proportional to the
+ * step, while the diffusion's is not — stepping coarsely makes the tape
+ * genuinely wilder than the one on screen. Measured over 20,000 rounds the
+ * spread of outcomes is 22.02bp at 60ms, 22.26bp at 250ms, 23.52bp at 1s and
+ * 24.79bp at 2s, and 1 + 0.0081*(step/60ms) predicts every one of those to
+ * within half a point.
+ *
+ * An earlier version ran at 2s, testing every rule against a tape 12.6% wilder
+ * than the real one. That is harmless for a rule that only reads direction and
+ * fatal for one that trades on the gap between quoted and realised volatility,
+ * which is the only kind that has ever measured positive here.
+ */
+const STEP_MS = 60;
+/** Picks stop being accepted this close to settlement, as in the live market. */
+const LOCK_MS = 5_000;
+/**
+ * How often a rule gets to see a new close.
+ *
+ * Deliberately separate from the engine's step. A rule that reads "the last 10
+ * closes" means a length of time, not a number of array slots, so decimating
+ * the tape to a fixed 2s here keeps every rule meaning exactly what it meant
+ * when the engine was stepped at 2s — while the engine underneath now runs at
+ * the app's real tick.
+ */
+const CLOSE_MS = 2_000;
 
 /** Simple moving average of the last `n`. */
 function mean(values: number[]): number {
@@ -171,19 +201,65 @@ export const RULES: { key: string; name: string; blurb: string; rule: Rule }[] =
       return s.quoted < 0.5 ? 'up' : 'down';
     },
   },
+  {
+    key: 'lateTail',
+    name: 'Long shots, late only',
+    blurb:
+      'The same long shots, but only inside the last 45 seconds — where the ' +
+      'quote is furthest from the truth.',
+    rule: (s) => {
+      if (s.msLeft > 45_000) return null;
+      const under = Math.min(s.quoted, 1 - s.quoted);
+      if (under < 0.01 || multiplierFor(under) < 6) return null;
+      return s.quoted < 0.5 ? 'up' : 'down';
+    },
+  },
+  {
+    key: 'lateEarly',
+    name: 'The same long shots, early only',
+    blurb:
+      'The control for the one above: identical prices, taken with more than ' +
+      'four minutes left instead.',
+    rule: (s) => {
+      if (s.msLeft < 240_000) return null;
+      const under = Math.min(s.quoted, 1 - s.quoted);
+      if (under < 0.01 || multiplierFor(under) < 6) return null;
+      return s.quoted < 0.5 ? 'up' : 'down';
+    },
+  },
+  {
+    key: 'subPenny',
+    name: 'Long shots priced under 1%',
+    blurb:
+      'Below 1% the payout stops improving but the odds keep getting worse. ' +
+      'Here to show what that costs.',
+    rule: (s) => {
+      const under = Math.min(s.quoted, 1 - s.quoted);
+      if (under >= 0.01) return null;
+      return s.quoted < 0.5 ? 'up' : 'down';
+    },
+  },
 ];
 
 /**
- * Runs a rule over independent rounds. One bet per round at most, so no two
- * results share an outcome and the interval means what it says.
+ * Runs every rule over the same independent rounds, at most one bet each per
+ * round, so no two of a rule's results share an outcome and its interval means
+ * what it says.
+ *
+ * Every rule sees the *same* tape. That is worth more than it costs: the tape
+ * is by far the expensive part, so sharing it runs eight rules for the price of
+ * one, and it makes the comparison between two rules paired rather than two
+ * separate draws — if one beats another here, it is not because it happened to
+ * get luckier rounds.
  */
-export function backtest(
-  rule: Rule,
-  name: string,
+export function backtestAll(
+  entries: { name: string; rule: Rule }[],
   rounds = 4_000,
   seedBase = 991,
-): StrategyResult {
-  const results: { won: boolean; multiplier: number }[] = [];
+  onProgress?: (done: number, total: number) => void,
+): StrategyResult[] {
+  const results: { won: boolean; multiplier: number }[][] = entries.map(() => []);
+  const placed: ({ side: Side; multiplier: number } | null)[] = entries.map(() => null);
 
   for (let r = 0; r < rounds; r++) {
     const engine = new PriceEngine({
@@ -193,18 +269,34 @@ export function backtest(
     });
     const strike = engine.price;
     const closes: number[] = [];
-    // One decision moment per round, spread across the round so the rule is
-    // not only ever judged at one point in the clock.
-    const at = 120_000 + ((r * 7919) % (ROUND_MS - 260_000));
-    let placed: { side: Side; multiplier: number } | null = null;
+    // One decision moment per round, and the clock reading at that moment is
+    // drawn log-uniformly rather than uniformly.
+    //
+    // Uniform sampling spends 95% of its looks in the first fourteen minutes
+    // and visits the closing seconds almost never — a rule that only trades
+    // there got 3 bets in 1,000 rounds, which is not a measurement. Time left
+    // is what the quote's error depends on, and it spans two and a half orders
+    // of magnitude, so it is sampled on the scale it varies over. The draw
+    // does not look at the price, and every rule is offered the same moment,
+    // so this changes which questions get answered, not the answers.
+    const u = ((r * 7919) % 10_007) / 10_007;
+    const msLeft0 = LOCK_MS * Math.pow((ROUND_MS - 60_000) / LOCK_MS, u);
+    const at = ROUND_MS - msLeft0;
+    placed.fill(null);
+    let decided = false;
 
+    let nextClose = CLOSE_MS;
     for (let t = STEP_MS; t <= ROUND_MS; t += STEP_MS) {
       const price = engine.step(STEP_MS);
+      if (t < nextClose) continue;
+      nextClose += CLOSE_MS;
       closes.push(price);
-      if (placed === null && t >= at) {
+      if (!decided && t >= at) {
         const msLeft = ROUND_MS - t;
+        if (msLeft < LOCK_MS) continue;
+        decided = true;
         const quoted = probUp(price, strike, engine.vol, msLeft);
-        const side = rule({
+        const snapshot: Snapshot = {
           closes,
           price,
           strike,
@@ -212,23 +304,39 @@ export function backtest(
           multiplier: multiplierFor(quoted),
           msLeft,
           vol: engine.vol,
-        });
-        if (side) {
+        };
+        for (let i = 0; i < entries.length; i++) {
+          const side = entries[i].rule(snapshot);
+          // A rule that declines here gets no second look this round.
+          if (!side) continue;
           const p = side === 'up' ? quoted : 1 - quoted;
-          placed = { side, multiplier: multiplierFor(p) };
-        } else {
-          // Rule declined here; it gets no second look this round.
-          placed = null;
-          break;
+          placed[i] = { side, multiplier: multiplierFor(p) };
         }
       }
     }
-    if (!placed) continue;
     const finishedUp = engine.price > strike;
-    results.push({ won: (placed.side === 'up') === finishedUp, multiplier: placed.multiplier });
+    for (let i = 0; i < entries.length; i++) {
+      const bet = placed[i];
+      if (!bet) continue;
+      results[i].push({ won: (bet.side === 'up') === finishedUp, multiplier: bet.multiplier });
+    }
+    if (onProgress && (r & 255) === 0) onProgress(r, rounds);
   }
+  if (onProgress) onProgress(rounds, rounds);
 
-  return summarise(name, results, Math.floor(results.length / 2));
+  return entries.map((e, i) =>
+    summarise(e.name, results[i], Math.floor(results[i].length / 2)),
+  );
+}
+
+/** One rule, same thing. Kept because a single rule is what a test asks about. */
+export function backtest(
+  rule: Rule,
+  name: string,
+  rounds = 4_000,
+  seedBase = 991,
+): StrategyResult {
+  return backtestAll([{ name, rule }], rounds, seedBase)[0];
 }
 
 /** Turns a run of settled bets into the numbers worth reading. */
