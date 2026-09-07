@@ -1,5 +1,5 @@
 import { PriceEngine, VOL_PRESETS, type VolPreset } from '../engine/priceEngine';
-import { volRatioOf } from '../engine/calibration';
+import { fairProbability, volRatioOf } from '../engine/calibration';
 import { LiveFeed } from '../engine/liveFeed';
 import { OrderBookSim, type OrderBookSnapshot } from '../engine/orderBook';
 import { TapeSim, type TapeEntry } from '../engine/tape';
@@ -1995,7 +1995,13 @@ export class MarketStore {
     const bars = aggregateBars(this.minuteBars, DEFAULT_CANDLE_MS, 160);
     const { state } = computeSignals(bars, SIGNAL_RULES);
     const bias = state.bias === 'long' ? 1 : state.bias === 'short' ? -1 : 0;
-    return { z, bias, momentum };
+    // The measured chance of finishing above, which the model starts from.
+    const prior = fairProbability(
+      probUp(this.price, this.round.strike, this.annualVol, msLeft),
+      msLeft / 1_000,
+      this.volRatio,
+    );
+    return { z, bias, momentum, prior };
   }
 
   /**

@@ -18,8 +18,23 @@ import {
   type LockedCall,
 } from './caller';
 import { normCdf } from '../lib/math';
+import { fairProbability } from './calibration';
 
-const flat = { z: 0, bias: 0, momentum: 0 };
+/**
+ * What the store hands the model: the measured chance of finishing above, at
+ * this distance from the target. An untrained caller repeats it exactly.
+ */
+const priorFor = (z: number) => fairProbability(normCdf(z), 660, 1);
+
+const flat = { z: 0, bias: 0, momentum: 0, prior: priorFor(0) };
+
+/** A coherent state: the prior always matches the gap it is built from. */
+const at = (z: number, over: Partial<typeof flat> = {}) => ({
+  ...flat,
+  z,
+  prior: priorFor(z),
+  ...over,
+});
 
 /**
  * A real 32-bit generator. The textbook `seed * 1103515245 + 12345` LCG is
@@ -56,7 +71,7 @@ describe('an untrained model', () => {
     // 1.6x logistic tracks the normal CDF within a few points, so a fresh
     // model reproduces option pricing instead of guessing.
     for (const z of [-2, -1, -0.5, 0, 0.5, 1, 2]) {
-      const p = predictUp({ ...flat, z }, INITIAL_MODEL);
+      const p = predictUp(at(z), INITIAL_MODEL);
       expect(Math.abs(p - normCdf(z))).toBeLessThan(0.03);
     }
   });
@@ -66,8 +81,8 @@ describe('an untrained model', () => {
   });
 
   it('gets more certain the further price is from the target', () => {
-    const near = predictUp({ ...flat, z: 0.4 }, INITIAL_MODEL);
-    const far = predictUp({ ...flat, z: 2.5 }, INITIAL_MODEL);
+    const near = predictUp(at(0.4), INITIAL_MODEL);
+    const far = predictUp(at(2.5), INITIAL_MODEL);
     expect(far).toBeGreaterThan(near);
     expect(far).toBeGreaterThan(0.9);
   });
@@ -100,12 +115,12 @@ describe('standardisedGap', () => {
 
 describe('makeCall', () => {
   it('commits to a side and reports confidence in that side', () => {
-    const up = makeCall({ ...flat, z: 1.2 }, INITIAL_MODEL);
+    const up = makeCall(at(1.2), INITIAL_MODEL);
     expect(up.side).toBe('up');
     expect(up.confidence).toBeCloseTo(up.pUp, 10);
     expect(up.confidence).toBeGreaterThan(0.5);
 
-    const down = makeCall({ ...flat, z: -1.2 }, INITIAL_MODEL);
+    const down = makeCall(at(-1.2), INITIAL_MODEL);
     expect(down.side).toBe('down');
     expect(down.confidence).toBeCloseTo(1 - down.pUp, 10);
     expect(down.confidence).toBeGreaterThan(0.5);
@@ -113,14 +128,14 @@ describe('makeCall', () => {
 
   it('never reports confidence below a half, whichever side it picks', () => {
     for (let z = -3; z <= 3; z += 0.25) {
-      expect(makeCall({ ...flat, z }, INITIAL_MODEL).confidence).toBeGreaterThanOrEqual(0.5);
+      expect(makeCall(at(z), INITIAL_MODEL).confidence).toBeGreaterThanOrEqual(0.5);
     }
   });
 });
 
 describe('learning from a graded call', () => {
   it('moves toward the outcome it got wrong', () => {
-    const features = { z: 0.8, bias: 1, momentum: 0.3 };
+    const features = { z: 0.8, bias: 1, momentum: 0.3 , prior: priorFor(0.8) };
     const before = predictUp(features, INITIAL_MODEL);
     // It leaned up and the round finished down: it should lean less next time.
     const after = predictUp(features, learn(INITIAL_MODEL, features, false));
@@ -128,8 +143,8 @@ describe('learning from a graded call', () => {
   });
 
   it('moves further the more confident the miss was', () => {
-    const mild = { z: 0.3, bias: 0, momentum: 0 };
-    const bold = { z: 2.5, bias: 0, momentum: 0 };
+    const mild = { z: 0.3, bias: 0, momentum: 0 , prior: priorFor(0.3) };
+    const bold = { z: 2.5, bias: 0, momentum: 0 , prior: priorFor(2.5) };
     const mildStep = learn(INITIAL_MODEL, mild, false);
     const boldStep = learn(INITIAL_MODEL, bold, false);
 
@@ -143,13 +158,13 @@ describe('learning from a graded call', () => {
 
     // And the correction is felt across the curve: read both models at a
     // common point and the confident miss has moved the model much further.
-    const at = { z: 1, bias: 0, momentum: 0 };
+    const at = { z: 1, bias: 0, momentum: 0 , prior: priorFor(1) };
     const base = predictUp(at, INITIAL_MODEL);
     expect(base - predictUp(at, boldStep)).toBeGreaterThan(base - predictUp(at, mildStep));
   });
 
   it('barely moves when it was already right', () => {
-    const features = { z: 2.8, bias: 1, momentum: 0 };
+    const features = { z: 2.8, bias: 1, momentum: 0 , prior: priorFor(2.8) };
     const before = predictUp(features, INITIAL_MODEL);
     const after = predictUp(features, learn(INITIAL_MODEL, features, true));
     expect(Math.abs(after - before)).toBeLessThan(0.01);
@@ -167,11 +182,11 @@ describe('learning from a graded call', () => {
     let model = INITIAL_MODEL;
     for (let i = 0; i < 400; i++) {
       const bias = i % 2 === 0 ? 1 : -1;
-      model = learn(model, { z: 0, bias, momentum: 0 }, bias > 0);
+      model = learn(model, { z: 0, bias, momentum: 0, prior: 0.5 }, bias > 0);
     }
     expect(model.weights[2]).toBeGreaterThan(1);
-    expect(predictUp({ z: 0, bias: 1, momentum: 0 }, model)).toBeGreaterThan(0.7);
-    expect(predictUp({ z: 0, bias: -1, momentum: 0 }, model)).toBeLessThan(0.3);
+    expect(predictUp({ z: 0, bias: 1, momentum: 0 , prior: priorFor(0) }, model)).toBeGreaterThan(0.7);
+    expect(predictUp({ z: 0, bias: -1, momentum: 0 , prior: priorFor(0) }, model)).toBeLessThan(0.3);
   });
 
   it('does not chase a signal that is not there', () => {
@@ -183,18 +198,18 @@ describe('learning from a graded call', () => {
       let model = INITIAL_MODEL;
       for (let i = 0; i < 600; i++) {
         const bias = next() < 0.5 ? 1 : -1;
-        model = learn(model, { z: 0, bias, momentum: 0 }, next() < 0.5);
+        model = learn(model, { z: 0, bias, momentum: 0, prior: 0.5 }, next() < 0.5);
       }
       expect(Math.abs(model.weights[2])).toBeLessThan(0.6);
-      expect(predictUp({ z: 0, bias: 1, momentum: 0 }, model)).toBeGreaterThan(0.3);
-      expect(predictUp({ z: 0, bias: 1, momentum: 0 }, model)).toBeLessThan(0.7);
+      expect(predictUp({ z: 0, bias: 1, momentum: 0 , prior: priorFor(0) }, model)).toBeGreaterThan(0.3);
+      expect(predictUp({ z: 0, bias: 1, momentum: 0 , prior: priorFor(0) }, model)).toBeLessThan(0.7);
     }
   });
 
   it('holds the weights in a sane band under a pathological run', () => {
     let model = INITIAL_MODEL;
     for (let i = 0; i < 5_000; i++) {
-      model = learn(model, { z: 6, bias: 1, momentum: 6 }, false);
+      model = learn(model, { z: 6, bias: 1, momentum: 6 , prior: priorFor(6) }, false);
     }
     for (const w of model.weights) {
       expect(Number.isFinite(w)).toBe(true);
@@ -231,7 +246,7 @@ function fakeCall(over: Partial<LockedCall> = {}): LockedCall {
     pUp: 0.8,
     spot: 78_100,
     strike: 78_000,
-    features: { z: 1, bias: 0, momentum: 0 },
+    features: { z: 1, bias: 0, momentum: 0 , prior: priorFor(1) },
     weights: [0, 1.6, 0, 0],
     ...over,
   };
@@ -251,7 +266,7 @@ describe('what a grade teaches', () => {
 
 describe('breaking a call down', () => {
   it('credits the gap when nothing else is in play', () => {
-    const parts = contributions({ z: 1.2, bias: 0, momentum: 0 }, [0, 1.6, 0.5, 0.3]);
+    const parts = contributions({ z: 1.2, bias: 0, momentum: 0 , prior: priorFor(1.2) }, [0, 1.6, 0.5, 0.3]);
     const gap = parts.find((p) => p.key === 'z')!;
     expect(gap.shift).toBeGreaterThan(0.2);
     // A feature sitting at zero cannot have moved anything.
@@ -260,13 +275,13 @@ describe('breaking a call down', () => {
   });
 
   it('signs each push by the direction it argued for', () => {
-    const parts = contributions({ z: 0.5, bias: -1, momentum: 0 }, [0, 1.6, 1.2, 0]);
+    const parts = contributions({ z: 0.5, bias: -1, momentum: 0 , prior: priorFor(0.5) }, [0, 1.6, 1.2, 0]);
     expect(parts.find((p) => p.key === 'z')!.shift).toBeGreaterThan(0);
     expect(parts.find((p) => p.key === 'bias')!.shift).toBeLessThan(0);
   });
 
   it('reports no effect from a feature the model gives no weight', () => {
-    const parts = contributions({ z: 1, bias: 1, momentum: 1 }, [0, 1.6, 0, 0]);
+    const parts = contributions({ z: 1, bias: 1, momentum: 1 , prior: priorFor(1) }, [0, 1.6, 0, 0]);
     expect(parts.find((p) => p.key === 'bias')!.shift).toBe(0);
     expect(parts.find((p) => p.key === 'momentum')!.shift).toBe(0);
   });
@@ -360,7 +375,7 @@ describe('whether the confidence means anything', () => {
     for (let i = 0; i < 4_000; i++) {
       // A spread of gaps, from sitting on the target to well clear of it.
       const z = (next() * 2 - 1) * 3;
-      const call = makeCall({ z, bias: 0, momentum: 0 }, INITIAL_MODEL);
+      const call = makeCall({ z, bias: 0, momentum: 0, prior: priorFor(z) }, INITIAL_MODEL);
       const finishedUp = next() < normCdf(z);
       const right = (call.side === 'up') === finishedUp;
 
@@ -481,5 +496,43 @@ describe('when a call can still be asked for', () => {
   it('is never allowed at all on a round too short to hold the wait', () => {
     // A one-minute round: its deadline is 43.8s in, less than the 90s wait.
     expect(canRequestCallAt(T, 60_000, T)).toBe(false);
+  });
+});
+
+describe('what the model cannot lose', () => {
+  it('does not throw the geometry away over a short bad run', () => {
+    // Five rounds where price was well clear of the target and every one went
+    // the other way. It should move — that is the point of grading — but a
+    // week of bad luck must not leave it calling the wrong side.
+    let model = INITIAL_MODEL;
+    for (let i = 0; i < 5; i++) model = learn(model, at(2), false);
+    expect(predictUp(at(2), model)).toBeGreaterThan(0.5);
+    expect(predictUp(at(2), model)).toBeLessThan(priorFor(2));
+  });
+
+  it('does give in eventually, because twenty confident misses mean something', () => {
+    // Not a flaw. A model that could never be argued out of its prior would
+    // not be learning, and twenty misses at this distance is real evidence
+    // that something about the setup is not what it was measured to be.
+    let model = INITIAL_MODEL;
+    for (let i = 0; i < 20; i++) model = learn(model, at(2), false);
+    expect(predictUp(at(2), model)).toBeLessThan(0.5);
+  });
+
+  it('says exactly what the measurement says before it is trained', () => {
+    for (const z of [-2.5, -1, 0, 1, 2.5]) {
+      expect(predictUp(at(z), INITIAL_MODEL)).toBeCloseTo(priorFor(z), 12);
+    }
+  });
+
+  it('still learns a correction the measurement does not know about', () => {
+    // A world where the trailing-stop bias decides everything. The offset says
+    // nothing about it, so the weight has to.
+    let model = INITIAL_MODEL;
+    for (let i = 0; i < 400; i++) {
+      const bias = i % 2 === 0 ? 1 : -1;
+      model = learn(model, { z: 0, bias, momentum: 0, prior: 0.5 }, bias > 0);
+    }
+    expect(predictUp({ z: 0, bias: 1, momentum: 0, prior: 0.5 }, model)).toBeGreaterThan(0.7);
   });
 });

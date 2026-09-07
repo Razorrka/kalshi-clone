@@ -259,10 +259,21 @@ export function CallsSheet() {
       </div>
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>Where the confidence comes from.</strong>{' '}
-        Untrained, it reproduces the textbook answer — the probability of
-        finishing above the target given how far away it is and how much time is
-        left. It starts there rather than at a coin flip, so it is useful before
-        it has learned anything.
+        Untrained, it says exactly what was measured: the rate at which a side
+        this far from the target, with this long left, actually finishes ahead.
+        Not the textbook figure — that one is wrong here, and the earlier
+        version of this approximated it with a logistic curve that was wrong
+        again in the other direction. The measurement enters as a fixed anchor
+        the model cannot argue away in a bad week; grading adds a correction on
+        top of it.
+      </div>
+      <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>And it is honest.</strong> Over
+        40,000 rounds called at the four-minute mark, every confidence band
+        landed inside itself: calls made at 50–60% came in right 55.3% of the
+        time, 60–70% right 64.6%, 70–80% right 75.6%, 80–90% right 84.4%, and
+        90%-plus right 92.3%. A confidence you cannot trust is worse than no
+        confidence at all, so it is worth checking rather than asserting.
       </div>
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>What grading does.</strong> Marking

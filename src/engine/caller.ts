@@ -19,6 +19,14 @@ export interface CallFeatures {
   bias: number;
   /** Recent drift, in the same standardised units as z. */
   momentum: number;
+  /**
+   * The measured chance of finishing above the target in this state.
+   *
+   * The model does not have to learn this and is not allowed to unlearn it:
+   * it enters as a fixed offset, and the weights below can only argue around
+   * it. See calibration.ts for where the number comes from.
+   */
+  prior: number;
 }
 
 export interface CallModel {
@@ -29,12 +37,19 @@ export interface CallModel {
 }
 
 /**
- * A logistic curve at 1.6x approximates the normal CDF closely, so an
- * untrained model reproduces the option-pricing answer rather than a coin
- * flip: it starts at the best available prior and adjusts from there.
+ * An untrained model says exactly what the measurement says, and nothing else.
+ *
+ * It used to approximate the odds with a logistic curve at 1.6x, on the usual
+ * rule of thumb that such a curve is close to the normal CDF. Over the range
+ * a caller actually sees that constant is not even the best logistic fit —
+ * 1.765 is — and the normal CDF is not what happens here anyway. So the
+ * measured probability now enters as a fixed offset and every weight starts at
+ * zero: the model begins on the best available answer and can only learn a
+ * correction to it, rather than having to rediscover the geometry from a
+ * handful of graded rounds and being able to lose it.
  */
 export const INITIAL_MODEL: CallModel = {
-  weights: [0, 1.6, 0, 0],
+  weights: [0, 0, 0, 0],
   trained: 0,
 };
 
@@ -56,7 +71,12 @@ function vector(f: CallFeatures): [number, number, number, number] {
 export function predictUp(features: CallFeatures, model: CallModel): number {
   const x = vector(features);
   const w = model.weights;
-  return sigmoid(w[0] * x[0] + w[1] * x[1] + w[2] * x[2] + w[3] * x[3]);
+  const offset = logit(clamp(features.prior, 1e-6, 1 - 1e-6));
+  return sigmoid(offset + w[0] * x[0] + w[1] * x[1] + w[2] * x[2] + w[3] * x[3]);
+}
+
+function logit(p: number): number {
+  return Math.log(p / (1 - p));
 }
 
 /**
@@ -324,7 +344,15 @@ export function contributions(
   const full = predictUp(features, model);
   const keys: ('z' | 'bias' | 'momentum')[] = ['z', 'bias', 'momentum'];
   return keys.map((key, i) => {
-    const without = predictUp({ ...features, [key]: 0 }, model);
-    return { key, value: features[key], weight: weights[i + 1], shift: full - without };
+    // Taking the gap out means taking out everything that depends on it,
+    // including the measured prior — which is nearly all of what it is worth.
+    // Zeroing only the learned weight would credit the gap with the small
+    // correction the model has learned on top of the geometry and hide the
+    // geometry itself, which is the part that actually decided the call.
+    const off =
+      key === 'z'
+        ? { ...features, z: 0, prior: 0.5 }
+        : { ...features, [key]: 0 };
+    return { key, value: features[key], weight: weights[i + 1], shift: full - predictUp(off, model) };
   });
 }
