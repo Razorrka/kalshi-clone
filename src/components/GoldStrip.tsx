@@ -1,5 +1,4 @@
 import { useMarket } from '../store/useMarket';
-import { fmtMoney } from '../lib/format';
 
 /**
  * The edge hunter, in one line.
@@ -19,7 +18,7 @@ export function GoldStrip() {
     return (
       <button className="gold-strip" onClick={() => store.openSheet('gold')}>
         <span className="gold-tag">GOLD</span>
-        <span className="gold-text dim">Nothing on the board clears the bar</span>
+        <span className="gold-text dim">nothing clears the bar</span>
       </button>
     );
   }
@@ -31,13 +30,12 @@ export function GoldStrip() {
     <button className={`gold-strip lit ${gold.grade.toLowerCase()}`} onClick={() => store.openSheet('gold')}>
       <span className="gold-tag">GOLD</span>
       <span className={`gold-side ${up ? 'yes' : 'no'}`}>{up ? 'UP' : 'DOWN'}</span>
+      {/* Payout and expected value. The stake and the interval are in the
+          sheet — this is a half-width strip and has to stay readable. */}
       <span className="gold-text">
-        <span className="tnum">{gold.multiplier.toFixed(2)}x</span>
-        <span className="dim"> · EV </span>
-        <span className={`tnum ${gold.ev >= 0 ? 'pos' : 'neg'}`}>{ev}</span>
-        <span className="dim tnum"> ±{(gold.evCi * 100).toFixed(1)}</span>
+        <span className="tnum">{gold.multiplier.toFixed(1)}x</span>
+        <span className={`tnum ${gold.ev >= 0 ? 'pos' : 'neg'}`}> {ev}</span>
       </span>
-      <span className="gold-stake tnum">{fmtMoney(gold.stake)}</span>
     </button>
   );
 }

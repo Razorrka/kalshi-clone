@@ -47,36 +47,37 @@ export default function App() {
         <div className="screen">
           <StatusBar />
           <TopBar />
-          {/* Everything between the bars scrolls. The strips grew past what a
-              short phone can show, and a trade button below the fold is worse
-              than no trade button. */}
-          <div className="scroller">
-            <MarketHeader />
-            <PriceStrip />
-            <ViewTabs />
-            <div className="chart-wrap">
-              {store.chartView === 'line' && (
-                <>
-                  <PriceChart />
-                  <WinTape />
-                </>
-              )}
-              {store.chartView === 'candles' && <CandleChart />}
-              {store.chartView === 'positions' && <PositionsPanel />}
-              <ResultToast />
-            </div>
+          <MarketHeader />
+          <PriceStrip />
+          <ViewTabs />
+          <div className="chart-wrap">
+            {store.chartView === 'line' && (
+              <>
+                <PriceChart />
+                <WinTape />
+              </>
+            )}
+            {store.chartView === 'candles' && <CandleChart />}
+            {store.chartView === 'positions' && <PositionsPanel />}
+            <ResultToast />
+          </div>
+          {/* The call and the button that asks for one belong on the same
+              line, and the two one-line readouts belong abreast. Four stacked
+              signal rows left the chart pinned at its floor with no room to
+              be a chart. */}
+          <div className="call-row-wrap">
             <CallStrip />
             <CallButton />
+          </div>
+          <div className="signal-row">
             <FlipStrip />
             <GoldStrip />
-            <SignalReadout />
-            <ControlsRow />
           </div>
-          <div className="screen-foot">
-            <CoachBanner />
-            <TradeArea />
-            <div className="home-bar" />
-          </div>
+          <SignalReadout />
+          <ControlsRow />
+          <CoachBanner />
+          <TradeArea />
+          <div className="home-bar" />
         </div>
 
         {store.sheet === 'book' && <OrderBookSheet />}

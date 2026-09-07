@@ -607,8 +607,16 @@ export class MarketStore {
       pUp,
       upPct: up,
       downPct: down,
-      upMultiplier: multiplierFor(pUp),
-      downMultiplier: multiplierFor(1 - pUp),
+      // Priced off the same whole cents the percentage shows.
+      //
+      // These used to come from the raw probability while the percentage beside
+      // them was rounded, so the button read "44%" and "2.17x" when 44% is
+      // 2.15x — two numbers on one button that contradicted each other, and a
+      // limit order resting at 44c then filled at 2.15x, which is not what the
+      // button had promised. A real book quotes whole cents; so does this one
+      // now, and the pair always sums to exactly 100.
+      upMultiplier: multiplierAtCents(up),
+      downMultiplier: multiplierAtCents(down),
     };
   }
 

@@ -15,7 +15,7 @@ export function FlipStrip() {
     return (
       <div className="flip-strip">
         <span className="flip-tag">FLIP</span>
-        <span className="flip-text dim">Reading the tape…</span>
+        <span className="flip-text dim">reading…</span>
       </div>
     );
   }
@@ -31,11 +31,9 @@ export function FlipStrip() {
     >
       <span className="flip-tag">FLIP</span>
       <span className="flip-dir">{flip.direction}</span>
-      <span className="flip-text">
-        <span className="tnum">{pct}%</span>
-        <span className="dim"> · {flip.confidence}</span>
-      </span>
-      <span className="flip-strength tnum">{flip.strength.toFixed(1)}</span>
+      {/* Percentage only. Confidence and strength moved to the sheet when this
+          became a half-width strip — a truncated "9." says less than nothing. */}
+      <span className="flip-text tnum">{pct}%</span>
     </button>
   );
 }

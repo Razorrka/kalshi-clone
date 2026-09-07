@@ -81,9 +81,18 @@ export function limitFills(marketCents: number, limitCents: number): boolean {
   return marketCents <= limitCents;
 }
 
-/** The live price of one side, in cents, as the book would quote it. */
+/**
+ * The live price of one side, in cents, as the book would quote it.
+ *
+ * Derived from the same rounding as the displayed percentages rather than
+ * rounded independently, so the two sides always come to exactly 100c. Rounded
+ * on their own they do not: at a 44.5% chance both sides round to 45 and 56,
+ * and the board would be quoting 101 cents for a pair of outcomes one of which
+ * must happen.
+ */
 export function sideCents(side: 'up' | 'down', pUp: number): number {
-  return clamp(Math.round(probOf(side, pUp) * 100), 1, 99);
+  const { up, down } = displayPercents(pUp);
+  return side === 'up' ? up : down;
 }
 
 /** The multiplier a fill at `cents` earns, carrying the same house edge. */

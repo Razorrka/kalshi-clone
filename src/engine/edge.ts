@@ -87,7 +87,25 @@ export const TARGET_MULTIPLIER = 3;
  */
 export function evThresholdFor(aggression: number): number {
   const a = clamp(aggression, 0, 1);
-  return 0.005 - a * 0.06;
+  // Anchored to a measured duty cycle rather than drawn as a straight line,
+  // because expected value on this board is not spread evenly. Almost
+  // everything on offer sits between -4.5% and -6.5% -- the near-coin-flips
+  // and the 3x band -- so a threshold moving in equal steps does nothing at
+  // all across most of the slider and then everything at the end. Measured
+  // over 400 rounds watched second by second, the share of the time something
+  // clears the bar runs:
+  //
+  //     -3.0%  5.4%      -5.0%  22.6%
+  //     -4.0%  8.3%      -5.5%  42.7%
+  //     -4.5% 10.5%      -6.0%  70.5%
+  //
+  // These points put the slider roughly at 1.5%, 5%, 20%, 50% and 87% of the
+  // time lit, which is a control that feels like it is doing something along
+  // its whole travel.
+  const stops = [0.005, -0.028, -0.0495, -0.0565, -0.075];
+  const x = a * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(x));
+  return stops[i] + (stops[i + 1] - stops[i]) * (x - i);
 }
 
 /**

@@ -1,14 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  HOUSE_EDGE,
-  displayPercents,
-  limitFills,
-  markToMarket,
-  multiplierAtCents,
-  multiplierFor,
-  probUp,
-  sideCents,
-} from './odds';
+import { HOUSE_EDGE, displayPercents, limitFills, markToMarket, multiplierAtCents, multiplierFor, probUp, sideCents } from './odds';
 
 const MIN = 60_000;
 
@@ -178,5 +169,37 @@ describe('limit orders', () => {
     expect(multiplierAtCents(20)).toBeGreaterThan(multiplierAtCents(50));
     expect(multiplierAtCents(50)).toBeGreaterThan(multiplierAtCents(80));
     expect(multiplierAtCents(50)).toBeCloseTo(multiplierFor(0.5), 10);
+  });
+});
+
+describe('what the button says and what it pays', () => {
+  it('quotes a multiplier that matches the percentage beside it', () => {
+    // The complaint this fixes: the button showed a rounded percentage next to
+    // a multiplier worked out from the unrounded probability, so it read "44%"
+    // and "2.17x" when 44% is 2.15x — two numbers on one button disagreeing.
+    for (let i = 0; i < 400; i++) {
+      const pUp = 0.001 + i * 0.0025;
+      const { up, down } = displayPercents(pUp);
+      expect(multiplierAtCents(up)).toBeCloseTo(multiplierFor(up / 100), 12);
+      expect(multiplierAtCents(down)).toBeCloseTo(multiplierFor(down / 100), 12);
+    }
+  });
+
+  it('never quotes the two sides at more than 100 cents between them', () => {
+    // Rounded independently they can: at 44.5% both sides round up, to 45 and
+    // 56, and the board would be pricing a pair of outcomes one of which must
+    // happen at 101 cents.
+    for (let i = 0; i <= 2_000; i++) {
+      const pUp = i / 2_000;
+      expect(sideCents('up', pUp) + sideCents('down', pUp)).toBe(100);
+    }
+  });
+
+  it('pays a limit fill at market exactly what the button showed', () => {
+    for (let i = 0; i < 200; i++) {
+      const pUp = 0.005 + i * 0.005;
+      const { up } = displayPercents(pUp);
+      expect(multiplierAtCents(sideCents('up', pUp))).toBe(multiplierAtCents(up));
+    }
   });
 });

@@ -120,32 +120,19 @@ input {
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-/* The market column between the top bars and the trade buttons. It scrolls
-   so that adding a strip can never push the buy and sell buttons off the
-   bottom of a short phone. */
-.scroller {
-  flex: 1 1 auto;
-  min-height: 0;
+  /* One column, and it scrolls only when it has to.
+     The chart takes whatever room is spare, so on a normal phone nothing
+     scrolls at all and the market is one piece. On a short one the column
+     overflows and this is what makes the trade buttons reachable instead of
+     stranded below a hidden edge, which is what they were. */
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  display: flex;
-  flex-direction: column;
   scrollbar-width: none;
 }
 
-.scroller::-webkit-scrollbar {
+.screen::-webkit-scrollbar {
   display: none;
-}
-
-/* Pinned: whatever else is on screen, the pick is always reachable. */
-.screen-foot {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
 }
 
 /* ------------------------------------------------------------ statusbar */
@@ -154,8 +141,8 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: max(12px, env(safe-area-inset-top)) 30px 4px;
-  height: 52px;
+  padding: max(8px, env(safe-area-inset-top)) 30px 2px;
+  height: 42px;
   flex: none;
   font-size: 16px;
   font-weight: 700;
@@ -180,7 +167,7 @@ input {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 23px 4px;
+  padding: 5px 23px 3px;
   flex: none;
 }
 
@@ -226,7 +213,7 @@ input {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 23px 2px;
+  padding: 6px 23px 2px;
   flex: none;
 }
 
@@ -309,7 +296,7 @@ input {
   display: flex;
   align-items: stretch;
   gap: 14px;
-  padding: 12px 46px 10px 23px;
+  padding: 8px 46px 7px 23px;
   flex: none;
   container-type: inline-size;
 }
@@ -410,7 +397,10 @@ input {
 .chart-wrap {
   position: relative;
   flex: 1 1 auto;
-  min-height: 190px;
+  /* A candle needs vertical room to look like a candle. At 190 the plot was
+     132px tall once the axis padding came off, which squashed every body into
+     a few pixels. The rows below were trimmed to pay for this. */
+  min-height: 250px;
 }
 
 .chart-wrap canvas {
@@ -481,7 +471,7 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 23px 14px;
+  padding: 5px 23px 8px;
   flex: none;
 }
 
@@ -530,12 +520,12 @@ input {
 .trade-area {
   flex: none;
   border-top: 1px solid #14171b;
-  padding: 14px 23px calc(6px + env(safe-area-inset-bottom));
+  padding: 9px 23px calc(4px + env(safe-area-inset-bottom));
 }
 
 .book-btn {
   width: 100%;
-  height: 48px;
+  height: 40px;
   border-radius: var(--radius-pill);
   border: 1px solid #262b33;
   display: flex;
@@ -658,7 +648,7 @@ input {
   height: 5px;
   border-radius: 3px;
   background: #4a4f57;
-  margin: 2px auto 8px;
+  margin: 1px auto 4px;
   flex: none;
 }
 
@@ -2871,4 +2861,65 @@ input {
   color: var(--muted-2);
   line-height: 1.45;
   margin-top: 5px;
+}
+
+/* Two signal readouts abreast, so the chart keeps its height. */
+.signal-row {
+  display: flex;
+  gap: 6px;
+  padding: 0 23px;
+  margin-top: 5px;
+  flex: none;
+}
+
+.signal-row > * {
+  width: auto;
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+}
+
+.signal-row .flip-dir,
+.signal-row .flip-text,
+.signal-row .gold-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The call, and the button that asks for one, on a single line. */
+.call-row-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0 23px;
+  margin-top: 6px;
+  flex: none;
+}
+
+.call-row-wrap > .call-strip {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+/* The on-demand call is a short pill now, not a full-width bar. */
+.call-row-wrap > .call-button {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 5px 11px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.call-row-wrap > .call-button .call-button-hint {
+  font-size: 9px;
+  max-width: 78px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

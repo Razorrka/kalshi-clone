@@ -345,9 +345,15 @@ describe('quoting', () => {
       expect(q.upPct + q.downPct).toBe(100);
       expect(q.upMultiplier).toBeGreaterThanOrEqual(1.01);
       expect(q.downMultiplier).toBeGreaterThanOrEqual(1.01);
-      // Whichever side is less likely has to pay more.
-      if (q.pUp > 0.5) expect(q.downMultiplier).toBeGreaterThan(q.upMultiplier);
-      if (q.pUp < 0.5) expect(q.upMultiplier).toBeGreaterThan(q.downMultiplier);
+      // Whichever side is quoted cheaper has to pay more — stated against the
+      // cents on the button rather than the raw probability behind it. The two
+      // are not the same question now that both numbers come from the same
+      // rounding: at a 49.97% chance both sides are quoted 50c and both pay
+      // 1.90x, which is right, and the old form of this asserted a strict
+      // inequality that such a moment breaks.
+      if (q.upPct > q.downPct) expect(q.downMultiplier).toBeGreaterThan(q.upMultiplier);
+      if (q.upPct < q.downPct) expect(q.upMultiplier).toBeGreaterThan(q.downMultiplier);
+      if (q.upPct === q.downPct) expect(q.upMultiplier).toBe(q.downMultiplier);
     }
   });
 });
