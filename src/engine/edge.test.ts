@@ -3,6 +3,7 @@ import {
   MAX_MULTIPLIER,
   MIN_MULTIPLIER,
   MIN_QUOTE,
+  MODEL_ERROR,
   bestAt,
   evCurve,
   evThresholdFor,
@@ -343,5 +344,46 @@ describe('does the hunter actually make money', () => {
     // away with a tight assertion here.
     expect(realised / n).toBeGreaterThan(-0.5);
     expect(realised / n).toBeLessThan(0.6);
+  });
+});
+
+describe('the interval it quotes', () => {
+  it('is never narrower than the model is accurate', () => {
+    // With billions of samples behind k its own interval is hair-thin, and a
+    // strip reading "+85.1% ±0.1" would be claiming a precision that one
+    // multiplier per cell simply does not have.
+    for (const s of [15, 60, 600]) {
+      for (const v of [0.3, 1, 2.5]) {
+        for (const p of [0.012, 0.03, 0.1, 0.3]) {
+          const pick = findEdge({ ...base, pUp: p, aggression: 1, secondsLeft: s, volRatio: v });
+          if (pick) expect(pick.evCi).toBeGreaterThanOrEqual(MODEL_ERROR - 1e-12);
+        }
+      }
+    }
+  });
+
+  it('downgrades an edge it cannot separate from zero', () => {
+    // PRIME has to mean the interval clears zero, so an edge smaller than the
+    // model's own error must not get it.
+    let prime = 0;
+    let fair = 0;
+    for (const s of [10, 20, 45, 120, 600]) {
+      for (const v of [0.3, 0.6, 1, 1.6, 2.5]) {
+        for (let p = 0.01; p < 0.5; p += 0.005) {
+          const pick = findEdge({ ...base, pUp: p, aggression: 0, secondsLeft: s, volRatio: v });
+          if (!pick) continue;
+          if (pick.grade === 'PRIME') {
+            prime++;
+            expect(pick.ev - pick.evCi).toBeGreaterThan(0);
+          }
+          if (pick.grade === 'FAIR') {
+            fair++;
+            expect(pick.ev).toBeGreaterThan(0);
+          }
+        }
+      }
+    }
+    expect(prime).toBeGreaterThan(0);
+    expect(fair).toBeGreaterThan(0);
   });
 });

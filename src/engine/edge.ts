@@ -90,6 +90,13 @@ export function evThresholdFor(aggression: number): number {
   return 0.005 - a * 0.06;
 }
 
+/**
+ * How far one volatility multiplier per cell sits from the 21 measured rates
+ * in it, in expected value: 0.688 points on average over all 1,176 cells.
+ * Every interval this module quotes is at least this wide.
+ */
+export const MODEL_ERROR = 0.0069;
+
 export type EdgeGrade = 'PRIME' | 'FAIR' | 'THIN';
 
 export interface EdgePick {
@@ -170,7 +177,18 @@ export function findEdge(input: EdgeInput): EdgePick | null {
     // Re-price at the low end of k's own interval: the gap is what the
     // measurement's uncertainty is worth on this particular ticket, which is
     // far more useful than an interval on k that nobody can read off a strip.
-    const evCi = Math.abs(ev - expectedValue(priceAtK(quoted, k - kCi), multiplier));
+    //
+    // Floored, because that interval only covers the noise in k and not the
+    // fact that one k cannot fit a cell perfectly. Checked over all 1,176
+    // cells, the model sits 0.688 points of expected value from the measured
+    // rate on average and 1.63 points at worst, so an interval narrower than
+    // that would be claiming a precision the model does not have — and with
+    // billions of samples behind k, its own interval alone would print +/-0.1
+    // beside an edge of +85%.
+    const evCi = Math.max(
+      Math.abs(ev - expectedValue(priceAtK(quoted, k - kCi), multiplier)),
+      MODEL_ERROR,
+    );
     if (ev < threshold) continue;
 
     const kelly = kellyFraction(fair, multiplier);

@@ -205,6 +205,16 @@ export function GoldSheet() {
 
       <div className="section-label">Read this before you trust the gold</div>
       <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>What the ± covers.</strong>{' '}
+        Both the noise in the measurement and the fact that one number per
+        cell cannot fit twenty-one measured prices exactly. Over all 1,176
+        cells the model sits 0.69 points of expected value from the measured
+        rate on average and 1.63 at worst, and no interval here is quoted
+        narrower than that — with billions of samples behind it the
+        measurement's own error alone would print ±0.1 beside an edge of +85%,
+        which would be a precision this does not have.
+      </div>
+      <div className="note">
         <strong style={{ color: 'var(--muted)' }}>The edge is real and it is small.</strong>{' '}
         The board's price is wrong in a measurable direction, but the house
         takes {Math.round(VIG * 100)}% of winnings and that swallows the error
