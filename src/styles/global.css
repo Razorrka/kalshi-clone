@@ -2866,10 +2866,38 @@ input {
 /* Two signal readouts abreast, so the chart keeps its height. */
 .signal-row {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   padding: 0 23px;
   margin-top: 5px;
   flex: none;
+}
+
+/* Half a row each, so everything inside has to be told it may shrink. */
+.signal-row .flip-strip,
+.signal-row .gold-strip {
+  gap: 5px;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.signal-row .flip-tag,
+.signal-row .gold-tag,
+.signal-row .gold-side,
+.signal-row .flip-dir {
+  flex: 0 0 auto;
+}
+
+.signal-row .flip-text,
+.signal-row .gold-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+}
+
+/* Lit, the gold styling and the side badge already say what this is, and half
+   a row is not enough for the word as well as the numbers it exists to show. */
+.signal-row .gold-strip.lit .gold-tag {
+  display: none;
 }
 
 .signal-row > * {
