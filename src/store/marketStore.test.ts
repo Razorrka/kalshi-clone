@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MarketStore } from './marketStore';
 import { learn } from '../engine/caller';
+import { MAX_MULTIPLIER, MIN_MULTIPLIER } from '../engine/edge';
 
 const MINUTE = 60_000;
 /** A whole minute boundary, so a 1-minute round opens exactly here. */
@@ -1314,8 +1315,11 @@ describe('the edge hunter', () => {
       expect(gold.side).toBe('up');
       expect(store.isGoldSide('up')).toBe(true);
       expect(store.isGoldSide('down')).toBe(false);
-      expect(gold.multiplier).toBeGreaterThanOrEqual(1.8);
-      expect(gold.multiplier).toBeLessThanOrEqual(11);
+      // Against the constants, not a copy of them. This read 11 — the old
+      // ceiling — and went on passing locally only because the pick happened
+      // to land under it; CI drew a different state and caught it at 83.4x.
+      expect(gold.multiplier).toBeGreaterThanOrEqual(MIN_MULTIPLIER);
+      expect(gold.multiplier).toBeLessThanOrEqual(MAX_MULTIPLIER);
     }
   });
 
