@@ -41,6 +41,9 @@ export interface StrategyResult {
   ev: number;
   /** Half-width of the 95% interval on that return. */
   ci: number;
+  /** The interval itself. Not symmetric about `ev` when wins are rare. */
+  evLow: number;
+  evHigh: number;
   /** Gross winnings over gross losses. Above 1 is a profit. */
   profitFactor: number;
   /** Worst peak-to-trough fall of a flat-staked bankroll, as a fraction. */
@@ -83,6 +86,22 @@ const LOCK_MS = 5_000;
  * the app's real tick.
  */
 const CLOSE_MS = 2_000;
+
+/**
+ * Wilson's score interval for a proportion, at 95%.
+ *
+ * Chosen over the textbook normal interval because it stays sane at the ends.
+ * With no wins in n bets the normal interval has zero width; Wilson's says
+ * the rate could still be as high as roughly 4/n, which is the truth.
+ */
+export function wilson(successes: number, n: number, z = 1.96): [number, number] {
+  if (n <= 0) return [0, 1];
+  const p = successes / n;
+  const d = 1 + (z * z) / n;
+  const centre = (p + (z * z) / (2 * n)) / d;
+  const half = (z / d) * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n));
+  return [Math.max(0, centre - half), Math.min(1, centre + half)];
+}
 
 /** Simple moving average of the last `n`. */
 function mean(values: number[]): number {
@@ -386,8 +405,9 @@ export function summarise(
   const n = results.length;
   if (n === 0) {
     return {
-      name, bets: 0, wins: 0, winRate: 0, ev: 0, ci: 0, profitFactor: 0,
-      maxDrawdown: 0, holdoutEv: 0, holdoutBets: 0, averagePayout: 0,
+      name, bets: 0, wins: 0, winRate: 0, ev: 0, ci: 0, evLow: 0, evHigh: 0,
+      profitFactor: 0, maxDrawdown: 0, holdoutEv: 0, holdoutBets: 0,
+      averagePayout: 0,
     };
   }
 
@@ -399,9 +419,13 @@ export function summarise(
   let peak = 0;
   let worst = 0;
   let payout = 0;
+  let minPayout = Infinity;
+  let maxPayout = 0;
 
   for (const r of results) {
     payout += r.multiplier;
+    if (r.multiplier < minPayout) minPayout = r.multiplier;
+    if (r.multiplier > maxPayout) maxPayout = r.multiplier;
     if (r.won) {
       wins += 1;
       returned += r.multiplier;
@@ -420,7 +444,41 @@ export function summarise(
   const rate = wins / n;
   const ev = returned / n - 1;
   const avg = payout / n;
-  const ci = 1.96 * avg * Math.sqrt((rate * (1 - rate)) / n);
+
+  // The interval on the return, and it takes two things to get right.
+  //
+  // The straightforward one is the spread of the per-bet returns, which
+  // handles a rule whose payouts vary — a coin flip takes everything from
+  // 1.01x to 90x, and its wins land on the cheap end, so anything that reasons
+  // from an average payout will conclude it is printing money.
+  //
+  // That one alone collapses to exactly zero when nothing won, which is the
+  // case where the sample says least: 44 shots at 53x with no winner is
+  // ordinary if the true rate is 2%. So it is widened to respect what the
+  // win *count* could have been — Wilson's interval on the rate, cashed at the
+  // best and worst payouts actually on offer. Whichever of the two is less
+  // sure wins.
+  let sq = 0;
+  for (const r of results) {
+    const ret = (r.won ? r.multiplier : 0) - 1;
+    sq += (ret - ev) * (ret - ev);
+  }
+  const spread = 1.96 * Math.sqrt(sq / n / n);
+  let evLow = ev - spread;
+  let evHigh = ev + spread;
+  // The widening only applies while one outcome or the other is scarce. That
+  // is the regime where the spread of a heavy-tailed payoff is untrustworthy,
+  // and it runs both ways: thirty wins and no losses has a sample spread of
+  // exactly zero too. Past a couple of dozen of each the spread is the better
+  // estimate, and the guard — which has to assume every bet could have paid
+  // the best price on offer — would be far too generous: it would let a rule
+  // backing 87% favourites at 1.9x claim it might be up 67%.
+  if (wins < 25 || n - wins < 25) {
+    const [wLo, wHi] = wilson(wins, n);
+    evLow = Math.min(evLow, wLo * minPayout - 1);
+    evHigh = Math.max(evHigh, wHi * maxPayout - 1);
+  }
+  const ci = (evHigh - evLow) / 2;
 
   const held = results.slice(holdoutFrom);
   const heldReturn = held.reduce((a, r) => a + (r.won ? r.multiplier : 0), 0);
@@ -432,6 +490,8 @@ export function summarise(
     winRate: rate,
     ev,
     ci,
+    evLow,
+    evHigh,
     profitFactor: lost > 0 ? gross / lost : gross > 0 ? Infinity : 0,
     maxDrawdown: worst,
     holdoutEv: held.length > 0 ? heldReturn / held.length - 1 : 0,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RULES, backtest, backtestAll, rsi, summarise } from './backtest';
+import { RULES, backtest, backtestAll, rsi, summarise, wilson } from './backtest';
 
 const won = (multiplier: number) => ({ won: true, multiplier });
 const lost = (multiplier: number) => ({ won: false, multiplier });
@@ -128,7 +128,7 @@ describe('what a big sample does to a small edge', () => {
     expect(big.ev).toBeLessThan(0);
     // With this many bets the interval excludes break-even, so it is a fact
     // rather than a run of luck.
-    expect(big.ev + big.ci).toBeLessThan(0);
+    expect(big.evHigh).toBeLessThan(0);
   });
 
   it('gives a long-shot rule an interval too wide to conclude anything from', () => {
@@ -136,5 +136,83 @@ describe('what a big sample does to a small edge', () => {
     const small = backtest(rule, 'tail', 400);
     // A handful of 40x bets cannot tell you anything, and the number says so.
     expect(small.ci).toBeGreaterThan(0.3);
+  });
+});
+
+describe('the interval, where it used to break', () => {
+  it('does not collapse to nothing when every bet lost', () => {
+    // The bug this replaced: with no winners the spread of the returns is
+    // exactly zero, so a rule that had 44 shots at 53x and missed them all was
+    // reported as "genuinely behind" with an interval of +/-0.0 — the one
+    // situation where the sample says least.
+    const all = Array.from({ length: 44 }, () => ({ won: false, multiplier: 53 }));
+    const r = summarise('unlucky', all, 22);
+    expect(r.ev).toBeCloseTo(-1, 9);
+    expect(r.ci).toBeGreaterThan(0.5);
+    expect(r.evHigh).toBeGreaterThan(0);
+  });
+
+  it('does not collapse when every bet won either', () => {
+    const all = Array.from({ length: 30 }, () => ({ won: true, multiplier: 2 }));
+    const r = summarise('lucky', all, 15);
+    expect(r.ci).toBeGreaterThan(0);
+    expect(r.evLow).toBeLessThan(r.ev);
+  });
+
+  it('still resolves a rule that has had enough chances', () => {
+    // 9 wins in 8,781 bets at 90x is decisively behind, and has to still read
+    // that way after the fix.
+    const many = Array.from({ length: 8_781 }, (_, i) => ({
+      won: i < 9,
+      multiplier: 90.1,
+    }));
+    const r = summarise('sub-penny', many, 4_390);
+    expect(r.evHigh).toBeLessThan(0);
+  });
+
+  it('brackets the point estimate', () => {
+    const mixed = Array.from({ length: 500 }, (_, i) => ({
+      won: i % 7 === 0,
+      multiplier: 6,
+    }));
+    const r = summarise('mixed', mixed, 250);
+    expect(r.evLow).toBeLessThan(r.ev);
+    expect(r.evHigh).toBeGreaterThan(r.ev);
+  });
+
+  it('wilson stays inside a probability at both ends', () => {
+    for (const [k, n] of [[0, 10], [10, 10], [0, 1], [1, 1], [3, 7]] as const) {
+      const [lo, hi] = wilson(k, n);
+      expect(lo).toBeGreaterThanOrEqual(0);
+      expect(hi).toBeLessThanOrEqual(1);
+      expect(hi).toBeGreaterThan(lo);
+    }
+  });
+});
+
+describe('the interval on a rule whose payouts vary', () => {
+  it('does not call a losing coin flip a winner', () => {
+    // The trap in reasoning from an average payout: a rule that spans the
+    // board wins its cheap bets and loses its dear ones, so win rate times
+    // mean payout says it is printing money. Here half the bets pay 1.01x and
+    // win, half pay 90x and lose. The mean payout is 45.5x and the mean return
+    // is -49.5%, and no interval may put those on the same side of zero.
+    const mixed = Array.from({ length: 800 }, (_, i) =>
+      i % 2 === 0 ? { won: true, multiplier: 1.01 } : { won: false, multiplier: 90 },
+    );
+    const r = summarise('spread', mixed, 400);
+    expect(r.ev).toBeLessThan(0);
+    expect(r.evLow).toBeLessThan(r.ev + 1e-9);
+    expect(r.evLow).toBeLessThan(0);
+  });
+
+  it('is tight where the payouts are all alike and the wins are many', () => {
+    const even = Array.from({ length: 4_000 }, (_, i) => ({
+      won: i % 2 === 0,
+      multiplier: 1.9,
+    }));
+    const r = summarise('even', even, 2_000);
+    expect(r.ci).toBeLessThan(0.06);
+    expect(r.evHigh).toBeLessThan(0);
   });
 });

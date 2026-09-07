@@ -15,8 +15,8 @@ const pct = (v: number, dp = 1) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(dp)}
 /** Does the interval clear zero, or is this just a run of luck? */
 function verdictOf(r: StrategyResult): { text: string; tone: string } {
   if (r.bets < 40) return { text: 'too few bets to say', tone: 'dead' };
-  if (r.ev - r.ci > 0) return { text: 'genuinely ahead', tone: 'good' };
-  if (r.ev + r.ci < 0) return { text: 'genuinely behind', tone: 'bad' };
+  if (r.evLow > 0) return { text: 'genuinely ahead', tone: 'good' };
+  if (r.evHigh < 0) return { text: 'genuinely behind', tone: 'bad' };
   return { text: 'indistinguishable from luck', tone: 'dead' };
 }
 
@@ -155,26 +155,38 @@ export function ProvingSheet() {
       </div>
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>The interval is the whole answer.</strong>{' '}
-        RSI extremes measured <span className="tnum">+12.7%</span> over 3,000
-        rounds, which reads like a discovery. Its interval was ±62 points. Run
-        the same rule over 40,000 rounds and it comes back at{' '}
-        <span className="tnum">−0.2%</span>. Nothing about the rule changed —
-        only the sample. Bollinger reversion did the same thing: +2.8% became
-        −1.5%.
+        The edge hunter reads <span className="tnum">−73.6%</span> over 2,000
+        rounds and <span className="tnum">+13.4%</span> over 20,000. Same rule,
+        same code — and neither number means anything, because the intervals
+        run from −125 to +571 and from −90 to +303. Multi-timeframe agreement
+        goes <span className="tnum">−15.8% ±5.7</span> to{' '}
+        <span className="tnum">−9.5% ±2.6</span>; MACD does the same. Watch the
+        ± column, not the return.
       </div>
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>Why rare rules lie loudest.</strong>{' '}
-        A rule that only fires on 30x long shots gets a handful of wins, and a
+        A rule that only fires on 60x long shots gets a handful of wins, and a
         handful of wins moves its return by tens of points. That is why the
         selective-looking rules always look the most promising and are the
         least trustworthy. Fewer signals is not the same as better signals.
       </div>
       <div className="note">
-        <strong style={{ color: 'var(--muted)' }}>What would a real edge look like?</strong>{' '}
-        A return whose whole interval sits above zero, holding on rounds it was
-        never tuned against. Nothing here has ever produced one, and on a
-        process with no memory nothing should — the price the market quotes is
-        already the best available answer, and the house takes 10% on top.
+        <strong style={{ color: 'var(--muted)' }}>What this tool cannot settle.</strong>{' '}
+        Twenty thousand rounds gives the hunter about 700 bets at 50x, which
+        cannot tell +13% from −50%. Run away from here it was measured over
+        700,000 rounds, sampled at the moments it actually fires, and came in
+        at <span className="tnum">+2.27% ± 1.94</span> against a prediction of
+        +1.20% made before the run — the one rule on this list whose interval
+        clears zero. This screen is honest about not being able to show you
+        that; a tool that could would be lying about something else.
+      </div>
+      <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>What it settles easily.</strong>{' '}
+        Long shots priced under 1% come in at{' '}
+        <span className="tnum">−84.6% ±8.9</span> — no ambiguity at all,
+        because the board's multiplier stops improving below 1% while the odds
+        keep getting worse. A rule that is genuinely terrible needs far less
+        evidence than one that is slightly good.
       </div>
     </Sheet>
   );

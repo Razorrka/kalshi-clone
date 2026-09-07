@@ -149,9 +149,11 @@ export function baselineStake(bets: BetRecord[], take = 8): number {
  * Everything the coach looks for, in the order it matters.
  *
  * Each one is a habit that measurably empties accounts, not a feeling about
- * the market. The coach has no view on whether a pick is good — it cannot,
- * nothing here is profitable — only on whether the way it is being taken is
- * survivable.
+ * the market. The coach has almost no view on whether a pick is good; it
+ * flags a badly priced one and otherwise stays out of it, because the thing
+ * that empties an account is nearly always the sizing rather than the pick.
+ * A ticket the edge hunter likes and the coach hates is a real combination,
+ * and the coach wins that argument.
  */
 export function findings(input: CoachInput): CoachFinding[] {
   const { bets, balance, sessionStart, now, proposedStake, proposedProb, msLeft, volRatio, limits } =

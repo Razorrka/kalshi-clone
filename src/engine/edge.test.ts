@@ -274,3 +274,74 @@ describe('does the correction hold on data it never saw', () => {
     }
   });
 });
+
+describe('does the hunter actually make money', () => {
+  /**
+   * The end-to-end claim, and the only one that matters: not "the model
+   * predicts better" but "the tickets it picks come back positive".
+   *
+   * One bet per round, taken at the FIRST moment the hunter's condition is
+   * met. First passage is a stopping time, so what the price does afterwards
+   * is independent of the decision to stop there — picking the best-looking
+   * moment in a round instead would condition on the path and flatter itself.
+   *
+   * Measured this way over 700,000 rounds the patient setting returned
+   * +2.27% ± 1.94 per dollar against a prediction of +1.20%, and the wide-open
+   * setting returned −5.37% ± 0.22 against a prediction of −4.95%. This runs
+   * a small slice of that: too few bets to confirm the sign, but enough to
+   * catch the pipeline breaking — a hunter that stopped firing, or started
+   * firing on the wrong side, or lost its stake sizing.
+   */
+  it('picks tickets whose realised return tracks what it predicted', { timeout: 300_000 }, () => {
+    const ROUND_MS = 15 * 60_000;
+    const STEP = 60;
+    const LOCK = 5_000;
+    const POLL = 1_000;
+    let n = 0;
+    let realised = 0;
+    let predicted = 0;
+
+    for (let round = 0; round < 3_000; round++) {
+      const engine = new PriceEngine({
+        seed: (round * 2246822519 + 991) >>> 0,
+        startPrice: 78_000,
+        annualVol: VOL_PRESETS.normal,
+      });
+      const strike = engine.price;
+      let taken: ReturnType<typeof findEdge> = null;
+      let nextPoll = POLL;
+      for (let t = STEP; t <= ROUND_MS; t += STEP) {
+        const price = engine.step(STEP);
+        if (t < nextPoll) continue;
+        nextPoll += POLL;
+        const msLeft = ROUND_MS - t;
+        if (taken || msLeft < LOCK) continue;
+        taken = findEdge({
+          pUp: probUp(price, strike, engine.vol, msLeft),
+          balance: 1_000,
+          aggression: 0,
+          tradable: true,
+          secondsLeft: msLeft / 1_000,
+          volRatio: volRatioOf(engine.vol, VOL_PRESETS.normal),
+        });
+      }
+      if (!taken) continue;
+      const won = (taken.side === 'up') === (engine.price > strike);
+      realised += won ? taken.multiplier - 1 : -1;
+      predicted += taken.ev;
+      n++;
+    }
+
+    // It has to fire. A calibration change that quietly switched the light off
+    // would otherwise pass every other test in this file.
+    expect(n).toBeGreaterThan(2_000);
+    // Everything it takes is a price it believes is profitable.
+    expect(predicted / n).toBeGreaterThan(0);
+    // And the realised return is in the same country. The bound is loose on
+    // purpose: at 60x a few hundred bets swing tens of points, which is the
+    // lesson the proving ground exists to teach and not something to pretend
+    // away with a tight assertion here.
+    expect(realised / n).toBeGreaterThan(-0.5);
+    expect(realised / n).toBeLessThan(0.6);
+  });
+});

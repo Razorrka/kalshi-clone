@@ -185,8 +185,10 @@ describe('the things that actually empty an account', () => {
   });
 
   it('never calls a clear board a good bet', () => {
-    // The distinction the whole app rests on: nothing here is profitable, so
-    // the coach is not allowed to imply otherwise.
+    // The distinction the whole app rests on: a clear board is not a good
+    // bet, and the coach is not allowed to imply otherwise. Even where the
+    // measurement does find a positive price, surviving to take it is the
+    // coach's subject and the price is not.
     const call = coach(input({ proposedStake: 10, proposedProb: 0.03, msLeft: 30_000 }));
     expect(call.action).toBe('Not the same as a good bet');
     expect(call.headline).not.toMatch(/GOOD|GO|BUY|TAKE/);

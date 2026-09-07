@@ -49,9 +49,10 @@ export function CoachSheet() {
         </>
       ) : (
         <div className="note">
-          Nothing flagged. That is not the same as a good bet — every price on
-          this board loses money on average. It only means the way you are
-          about to take one is not the way accounts end.
+          Nothing flagged. That is not the same as a good bet — nearly every
+          price on this board loses money on average, and the narrow window
+          that does not is a different question from this one. It only means
+          the way you are about to take a ticket is not the way accounts end.
         </div>
       )}
 
