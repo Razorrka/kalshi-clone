@@ -34,6 +34,7 @@ function input(over: Partial<CoachInput> = {}): CoachInput {
     proposedStake: 20,
     proposedProb: 0.45,
     msLeft: 300_000,
+    volRatio: 1,
     limits: DEFAULT_LIMITS,
     ...over,
   };
@@ -160,8 +161,9 @@ describe('the things that actually empty an account', () => {
     expect(keys(busy)).toContain('overtrading');
   });
 
-  it('flags the worst-priced part of the board, gently', () => {
-    // Around 42% implied, measured at -6.3% per dollar.
+  it('flags a badly priced ticket, gently', () => {
+    // A near coin flip is the worst thing on the board at any moment: the
+    // quote is barely wrong there and the vig is charged in full.
     const bad = input({ proposedProb: 0.42 });
     const found = findings(bad).find((f) => f.key === 'badprice')!;
     expect(found.severity).toBe(1);
@@ -173,7 +175,9 @@ describe('the things that actually empty an account', () => {
   });
 
   it('says nothing at all when nothing is wrong', () => {
-    const fine = input({ proposedStake: 15, proposedProb: 0.3, msLeft: 400_000 });
+    // A small stake on a long shot with half a minute left: the one corner of
+    // the board where the measurement does not have a complaint.
+    const fine = input({ proposedStake: 15, proposedProb: 0.03, msLeft: 30_000 });
     expect(findings(fine)).toHaveLength(0);
     const call = coach(fine);
     expect(call.verdict).toBe('CLEAR');
@@ -183,7 +187,7 @@ describe('the things that actually empty an account', () => {
   it('never calls a clear board a good bet', () => {
     // The distinction the whole app rests on: nothing here is profitable, so
     // the coach is not allowed to imply otherwise.
-    const call = coach(input({ proposedStake: 10, proposedProb: 0.3, msLeft: 400_000 }));
+    const call = coach(input({ proposedStake: 10, proposedProb: 0.03, msLeft: 30_000 }));
     expect(call.action).toBe('Not the same as a good bet');
     expect(call.headline).not.toMatch(/GOOD|GO|BUY|TAKE/);
   });

@@ -1,4 +1,5 @@
 import { clamp, normCdf } from '../lib/math';
+import { touchProbabilityAt, touchResidual } from './calibration';
 import type { Candle, Side, Tick } from './types';
 import type { OrderBookSnapshot } from './orderBook';
 import type { TapeEntry } from './tape';
@@ -478,37 +479,49 @@ export class FlipRolling {
  * How much each feature moves the log-odds away from the baseline, per
  * standard deviation of its own gap-conditioned normal.
  *
- * These are fitted, not guessed: a logistic regression over 72,540 samples
- * from 260 simulated rounds, with the baseline log-odds as a fixed offset so
- * the features could only earn weight for what the geometry does not already
- * say. Held out by round, the fitted weights at full strength scored AUC
- * 0.893 against the baseline's own 0.918 — worse. Shrinking them found the
- * peak at a tenth of the fit: 0.9181 against 0.9178.
+ * They are very small, and that is the finding rather than a hedge.
  *
- * So they ship at a tenth, and that is the honest size of them. The exact
- * touch probability is the answer; these can lean on it and no more. A
- * detector that lets a book reading override the geometry is one that will be
- * confidently wrong.
+ * The previous set was fitted over 72,540 samples from 260 rounds. Clustered
+ * by round — and every sample inside one round rides the same price path —
+ * that is an effective sample of about 260 for sixteen features, which is
+ * enough to fit noise and not much else. It showed: at full strength those
+ * weights scored AUC 0.893 against the geometry's own 0.918, so they had to be
+ * shrunk to a tenth to stop them doing harm.
+ *
+ * Refitted properly — L2-regularised logistic regression with the measured
+ * touch probability as a fixed offset, so a feature can only earn weight for
+ * what the geometry does not already say, and the penalty chosen by
+ * cross-validation grouped BY ROUND rather than by sample — the answer is
+ * blunt. Held out, the sixteen inputs together are worth +0.00009 of AUC over
+ * the geometry alone, and the cross-validation picks a penalty so heavy that
+ * the largest surviving weight is 0.02. Several of the old signs were simply
+ * wrong: `rejection` was fitted at +0.493 and comes back negative.
+ *
+ * So the honest weights are these, and the honest reading of the flip
+ * detector is that the geometry is the detector. The sixteen inputs are worth
+ * keeping on screen because they explain *why* the odds are what they are, and
+ * `failedBreak` and `rejection` do carry real information on their own — they
+ * are just not information the distance to the target has not already used.
  */
-export const WEIGHT_SHRINK = 0.1;
+export const WEIGHT_SHRINK = 1;
 
 const FITTED = {
-  failedBreak: 0.605,
-  liquidityPull: 0.509,
-  rejection: 0.493,
-  spread: 0.479,
-  trajectory: 0.354,
-  depth: 0.308,
-  velocity: 0.277,
-  roc: 0.201,
-  volumeAccel: 0.191,
-  volatility: -0.189,
-  momentumDivergence: -0.121,
-  tradeImbalance: 0.11,
-  regimeShift: 0.085,
-  acceleration: -0.03,
-  largeOrders: -0.026,
-  bookImbalance: -0.023,
+  volatility: -0.0201,
+  velocity: -0.0155,
+  bookImbalance: 0.0135,
+  liquidityPull: 0.0103,
+  roc: -0.0093,
+  acceleration: -0.0065,
+  tradeImbalance: 0.0045,
+  rejection: -0.0037,
+  trajectory: -0.0036,
+  volumeAccel: 0.0034,
+  depth: 0.0018,
+  regimeShift: 0.0018,
+  failedBreak: -0.001,
+  momentumDivergence: -0.0008,
+  largeOrders: 0.0004,
+  spread: -0.0002,
 } as const;
 
 export const FLIP_WEIGHTS: Record<string, number> = Object.fromEntries(
@@ -679,10 +692,17 @@ export function reasonsFor(
   limit = 6,
 ): FlipReason[] {
   const out: FlipReason[] = [];
-  for (const part of parts) {
+  // Ranked by how far the input itself has moved, not by how much it shifts
+  // the odds. The weights are tiny — measured, the sixteen inputs together are
+  // worth +0.00009 of AUC over the geometry — so ranking by their push would
+  // leave the strip with nothing to say while the tape was plainly doing
+  // something. What a reason claims is "this is happening", and `backed` marks
+  // the two that also measurably predict a flip.
+  const byMove = [...parts].sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  for (const part of byMove) {
     if (out.length >= limit) break;
-    // Only what argues for the flip, and only once it is saying something.
-    if (part.push <= 0.004) continue;
+    // Only what argues for the flip, and only once it has really moved.
+    if (part.value <= 1.5) continue;
     const pair = PHRASES[part.key];
     if (!pair) continue;
     // Phrased by the state the feature is actually in, so the sentence stays
@@ -718,19 +738,25 @@ export function isBacked(key: keyof FlipFeatures): boolean {
  * window behind them; a 78% built on one loud reading and five quiet ones is
  * a guess wearing a number, and says LOW.
  */
-export function confidenceOf(parts: Contribution[], samples: number): FlipConfidence {
-  const speaking = parts.filter((p) => Math.abs(p.push) > 0.004);
-  if (speaking.length === 0 || samples < 20) return 'LOW';
-  const forFlip = speaking.filter((p) => p.push > 0).length;
-  const against = speaking.length - forFlip;
-  const agreement = Math.max(forFlip, against) / speaking.length;
-  const total = speaking.reduce((a, p) => a + Math.abs(p.push), 0);
-
-  if (agreement >= 0.75 && speaking.length >= 4 && total > 0.06 && samples >= 60) {
-    return 'HIGH';
-  }
-  if (agreement >= 0.6 && speaking.length >= 3) return 'MEDIUM';
-  return 'LOW';
+export function confidenceOf(
+  parts: Contribution[],
+  samples: number,
+  residual = 0.001,
+): FlipConfidence {
+  // Confidence is about the answer, not about the inputs.
+  //
+  // It used to count how many of the sixteen features agreed with each other,
+  // which reads well and means nothing: measured against the geometry they are
+  // worth +0.00009 of AUC between them, so sixteen of them nodding along is
+  // sixteen coin flips landing the same way. What is actually uncertain here
+  // is the touch probability itself, and the measurement says exactly where —
+  // its fit is within a tenth of a point over most of the grid and drifts to
+  // three points on a becalmed tape with seconds left.
+  if (samples < 20) return 'LOW';
+  const speaking = parts.filter((p) => Math.abs(p.push) > 0.0005).length;
+  if (residual > 0.02 || samples < 60) return 'LOW';
+  if (residual > 0.005 || speaking === 0) return 'MEDIUM';
+  return 'HIGH';
 }
 
 /**
@@ -744,10 +770,16 @@ export function makeFlipSignal(
   spot: number,
   strike: number,
   now: number,
+  horizonSeconds = FLIP_HORIZON_MS / 1_000,
+  volRatio = 1,
 ): FlipSignal {
   const leader: Side = spot >= strike ? 'up' : 'down';
   const challenger: Side = leader === 'up' ? 'down' : 'up';
-  const baseline = touchProbability(features.horizonGap);
+  // The measured touch rate, not the textbook one. 2*N(-|z|) assumes the level
+  // is watched continuously and the walk has no jumps; this app checks once a
+  // second and this tape jumps, and the two errors run in opposite directions
+  // — see calibration.ts.
+  const baseline = touchProbabilityAt(features.horizonGap, horizonSeconds, volRatio);
   const parts = contributions(features);
   const push = parts.reduce((a, p) => a + p.push, 0);
 
@@ -760,7 +792,7 @@ export function makeFlipSignal(
   // *above* the true baseline deep in the tail and quietly overrule the exact
   // answer with a rounder-looking one.
   const probability = clamp(sigmoid(logit(baseline) + push + historyPush), 1e-6, 1 - 1e-6);
-  const confidence = confidenceOf(parts, samples);
+  const confidence = confidenceOf(parts, samples, touchResidual(horizonSeconds, volRatio));
   // Strength is how actionable the reading is, not a second probability: the
   // odds discounted by how much the evidence behind them is worth.
   const trust = confidence === 'HIGH' ? 1 : confidence === 'MEDIUM' ? 0.85 : 0.65;

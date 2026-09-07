@@ -1348,13 +1348,30 @@ describe('the edge hunter', () => {
     expect(loose).toBeGreaterThan(patient);
   });
 
-  it('reports an edge that is honestly negative', () => {
+  it('reports what a pick is worth rather than asserting a sign', () => {
+    // This used to insist the expected value was always negative, which was
+    // true of the band table it was written against and is not true now: the
+    // measurement finds a real, narrow window where a long shot pays for
+    // itself. What must hold is that the number shown is the number implied.
     store.setGoldAggression(1);
     store.setManualStrike(store.price + 300);
     run(2_000);
     if (store.gold) {
-      expect(store.gold.ev).toBeLessThan(0);
-      expect(store.gold.fair).toBeGreaterThan(store.gold.quoted);
+      const g = store.gold;
+      expect(g.fair).toBeGreaterThan(g.quoted);
+      expect(g.ev).toBeCloseTo(g.fair * g.multiplier - 1, 9);
+      expect(g.evCi).toBeGreaterThan(0);
+    }
+  });
+
+  it('only ever lights on a price the board can actually pay properly', () => {
+    // Under a 1% quote the multiplier clamps, so the payout stops improving
+    // while the odds keep getting worse.
+    store.setGoldAggression(1);
+    for (const offset of [-1_500, -400, 400, 1_500]) {
+      store.setManualStrike(store.price + offset);
+      run(3_000);
+      if (store.gold) expect(store.gold.quoted).toBeGreaterThanOrEqual(0.01);
     }
   });
 

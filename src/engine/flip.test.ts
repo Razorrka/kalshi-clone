@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { touchProbabilityAt } from './calibration';
 import {
   EMPTY_FEATURES,
   FLIP_HORIZON_MS,
@@ -380,18 +381,19 @@ describe('weights and what they are worth', () => {
   });
 
   it('keeps every weight small enough that the geometry still decides', () => {
-    // Measured: at full fitted strength the features made the answer worse
-    // (AUC 0.893 against the baseline's 0.918). They ship at a tenth.
+    // Refitted with the penalty chosen by cross-validation grouped by round,
+    // the sixteen inputs are worth +0.00009 of AUC over the geometry alone and
+    // the fit shrinks them to almost nothing. This pins that they stay there.
     for (const key of SCORED_KEYS) {
-      expect(Math.abs(FLIP_WEIGHTS[key])).toBeLessThan(0.07);
+      expect(Math.abs(FLIP_WEIGHTS[key])).toBeLessThan(0.025);
     }
 
     // The pathological ceiling: every one of the sixteen pinned at a
-    // four-sigma outlier and all arguing the same way. That is 1.60 in
-    // log-odds, and it is a number worth knowing rather than hiding — it is
-    // the most the features could ever overrule the geometry by.
+    // four-sigma outlier and all arguing the same way. Under the old weights
+    // that came to 1.60 in log-odds, enough to overrule the geometry outright.
+    // It is now under a quarter of that.
     const ceiling = SCORED_KEYS.reduce((a, k) => a + Math.abs(FLIP_WEIGHTS[k]) * 4, 0);
-    expect(ceiling).toBeCloseTo(1.6, 1);
+    expect(ceiling).toBeLessThan(0.4);
 
     // What actually happens: a feature set all sitting a sigma out, which is
     // already an unusual reading, barely moves a 32% baseline.
@@ -432,13 +434,29 @@ describe('turning the score into a signal', () => {
     expect(below.challenger).toBe('up');
   });
 
-  it('lands on the exact baseline when nothing has anything to say', () => {
+  it('lands on the measured baseline when nothing has anything to say', () => {
     const quiet = makeFlipSignal(
       { ...EMPTY_FEATURES, gap: 0.8, horizonGap: 1.5 }, [], 100, 78_200, 78_000, NOW,
     );
-    expect(quiet.baseline).toBeCloseTo(touchProbability(1.5), 12);
+    expect(quiet.baseline).toBeCloseTo(touchProbabilityAt(1.5, 60, 1), 12);
     expect(quiet.probability).toBeCloseTo(quiet.baseline, 10);
     expect(quiet.reasons).toHaveLength(0);
+  });
+
+  it('does not use the textbook formula, because it is wrong here', () => {
+    // 2*N(-|z|) assumes the level is watched continuously. The app resolves a
+    // flip once a second, so a cross that comes straight back never counts,
+    // and near the target the formula promises flips that do not happen.
+    const near = makeFlipSignal(
+      { ...EMPTY_FEATURES, gap: 0.2, horizonGap: 0.3 }, [], 100, 78_020, 78_000, NOW,
+    );
+    expect(near.baseline).toBeLessThan(touchProbability(0.3));
+    // Far out the error runs the other way: jumps reach levels a lognormal
+    // does not.
+    const far = makeFlipSignal(
+      { ...EMPTY_FEATURES, gap: 2.4, horizonGap: 2.6 }, [], 100, 78_600, 78_000, NOW,
+    );
+    expect(far.baseline).toBeGreaterThan(touchProbability(2.6));
   });
 
   it('stays a probability however hard the features push', () => {
@@ -454,15 +472,15 @@ describe('turning the score into a signal', () => {
   });
 
   it('only gives reasons that argue for the flip', () => {
-    // Everything pointing away from a flip should produce no case for one.
+    // Every input sitting well away from the flip should produce no case for
+    // one. Reasons are read off the inputs' own movement now rather than off
+    // the weights, so the test states them that way.
     const calm = SCORED_KEYS.reduce(
-      (acc, k) => ({ ...acc, [k]: FLIP_WEIGHTS[k] > 0 ? -3 : 3 }),
+      (acc, k) => ({ ...acc, [k]: -3 }),
       { ...EMPTY_FEATURES, gap: 2, horizonGap: 3 } as FlipFeatures,
     );
     const s = makeFlipSignal(calm, [], 200, 78_500, 78_000, NOW);
     expect(s.reasons).toHaveLength(0);
-    // And it goes below the baseline rather than being propped up by a floor.
-    expect(s.probability).toBeLessThan(s.baseline);
     expect(s.probability).toBeGreaterThan(0);
   });
 
@@ -497,31 +515,25 @@ describe('confidence', () => {
     expect(confidenceOf(parts({ failedBreak: 4, rejection: 4 }), 5)).toBe('LOW');
   });
 
-  it('is low when nothing is saying anything', () => {
-    expect(confidenceOf(parts({}), 500)).toBe('LOW');
+  it('is high where the measurement behind the answer is tight', () => {
+    // Confidence is about the touch probability, not about how many of the
+    // sixteen inputs happen to nod along — measured, they are worth +0.00009
+    // of AUC between them, so their agreement is sixteen coins landing alike.
+    expect(confidenceOf(parts({ failedBreak: 4 }), 200, 0.0006)).toBe('HIGH');
   });
 
-  it('is high when several inputs agree off a real window', () => {
-    const agreeing = parts({
-      failedBreak: 4,
-      rejection: 4,
-      liquidityPull: 4,
-      spread: 4,
-      trajectory: 4,
-      depth: 4,
-    });
-    expect(confidenceOf(agreeing, 200)).toBe('HIGH');
+  it('drops when the model fits the measurement poorly in this state', () => {
+    // Worst on a becalmed tape with seconds left, where a fixed
+    // microstructure bounce with almost no diffusion under it is not a
+    // lognormal at any width.
+    expect(confidenceOf(parts({ failedBreak: 4 }), 200, 0.008)).toBe('MEDIUM');
+    expect(confidenceOf(parts({ failedBreak: 4 }), 200, 0.03)).toBe('LOW');
   });
 
-  it('will not call it high when the inputs contradict each other', () => {
-    const split = parts({
-      failedBreak: 4,
-      rejection: 4,
-      liquidityPull: -4,
-      spread: -4,
-      trajectory: -4,
-    });
-    expect(confidenceOf(split, 200)).not.toBe('HIGH');
+  it('ignores the inputs agreeing with each other', () => {
+    const agreeing = parts({ failedBreak: 4, rejection: 4, liquidityPull: 4, spread: 4 });
+    const split = parts({ failedBreak: 4, rejection: -4, liquidityPull: 4, spread: -4 });
+    expect(confidenceOf(agreeing, 200, 0.0006)).toBe(confidenceOf(split, 200, 0.0006));
   });
 
   it('discounts the strength of a reading it does not trust', () => {

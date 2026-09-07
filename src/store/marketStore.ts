@@ -1,4 +1,5 @@
 import { PriceEngine, VOL_PRESETS, type VolPreset } from '../engine/priceEngine';
+import { volRatioOf } from '../engine/calibration';
 import { LiveFeed } from '../engine/liveFeed';
 import { OrderBookSim, type OrderBookSnapshot } from '../engine/orderBook';
 import { TapeSim, type TapeEntry } from '../engine/tape';
@@ -1572,6 +1573,7 @@ export class MarketStore {
       proposedStake: this.sheet === 'ticket' ? this.ticketStake : 0,
       proposedProb: side === 'up' ? this.quote.pUp : 1 - this.quote.pUp,
       msLeft: this.msLeft,
+      volRatio: this.volRatio,
       limits: this.limits,
     });
   }
@@ -1585,6 +1587,26 @@ export class MarketStore {
     );
   }
 
+  /**
+   * The tape's volatility over its own long-run level.
+   *
+   * This is the axis the board's pricing error varies most along, so both the
+   * edge hunter and the coach need it. In JIT Coin the long-run level is the
+   * preset the engine is pulling toward. On the live tape there is no such
+   * anchor — the volatility shown is measured off the tape itself and is by
+   * construction near its own recent average — so the ratio is 1 and the
+   * correction falls back to what was measured at that level.
+   */
+  get volRatio(): number {
+    if (this.mode === 'live') return 1;
+    return volRatioOf(this.annualVol, VOL_PRESETS[this.volPreset]);
+  }
+
+  /** Seconds until this round settles. */
+  get secondsLeft(): number {
+    return Math.max(0, this.msLeft) / 1_000;
+  }
+
   /** What the coach says about a specific size, for the ticket sheet. */
   judge(side: Side, stake: number): CoachCall {
     return coach({
@@ -1595,6 +1617,7 @@ export class MarketStore {
       proposedStake: stake,
       proposedProb: side === 'up' ? this.quote.pUp : 1 - this.quote.pUp,
       msLeft: this.msLeft,
+      volRatio: this.volRatio,
       limits: this.limits,
     });
   }
@@ -1615,6 +1638,7 @@ export class MarketStore {
       proposedStake: 0,
       proposedProb: 0.5,
       msLeft: this.msLeft,
+      volRatio: this.volRatio,
       limits: this.limits,
     });
     return call.verdict === 'STOP';
@@ -1679,6 +1703,8 @@ export class MarketStore {
       balance: this.balance,
       aggression: this.goldAggression,
       tradable: this.canTrade,
+      secondsLeft: this.secondsLeft,
+      volRatio: this.volRatio,
     });
   }
 
@@ -1781,6 +1807,7 @@ export class MarketStore {
     this.freshTape = [];
 
     const features = this.flipRolling.normalise(raw);
+    const horizon = Math.min(FLIP_HORIZON_MS, msLeft);
     this.flip = makeFlipSignal(
       features,
       this.flipMemory,
@@ -1788,6 +1815,8 @@ export class MarketStore {
       this.price,
       this.round.strike,
       now,
+      horizon / 1_000,
+      this.volRatio,
     );
     this.flipPending.push({
       features,

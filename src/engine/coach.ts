@@ -1,5 +1,6 @@
 import { clamp } from '../lib/math';
-import { bandFor } from './edge';
+import { expectedValue, fairProbability } from './edge';
+import { multiplierFor } from './odds';
 import type { Side } from './types';
 
 /**
@@ -105,6 +106,8 @@ export interface CoachInput {
   proposedStake: number;
   proposedProb: number;
   msLeft: number;
+  /** Live volatility over its long-run level; drives how wrong the quote is. */
+  volRatio: number;
   limits: CoachLimits;
 }
 
@@ -151,7 +154,8 @@ export function baselineStake(bets: BetRecord[], take = 8): number {
  * survivable.
  */
 export function findings(input: CoachInput): CoachFinding[] {
-  const { bets, balance, sessionStart, now, proposedStake, proposedProb, msLeft, limits } = input;
+  const { bets, balance, sessionStart, now, proposedStake, proposedProb, msLeft, volRatio, limits } =
+    input;
   const out: CoachFinding[] = [];
   const settled = bets.filter((b) => b.status !== 'open');
   const streak = lossStreakOf(bets);
@@ -272,15 +276,24 @@ export function findings(input: CoachInput): CoachFinding[] {
     }
 
     // --- the price ---------------------------------------------------------
-    const band = bandFor(Math.min(proposedProb, 1 - proposedProb));
-    if (band && band.ev < -0.05) {
+    // Priced against the measured calibration rather than a band table, so
+    // this reads the ticket actually in front of you: the same payout is a
+    // different bet with eleven minutes left than with eleven seconds.
+    const secondsLeft = Math.max(msLeft, 0) / 1_000;
+    const pays = multiplierFor(proposedProb);
+    const ev = expectedValue(
+      fairProbability(proposedProb, secondsLeft, volRatio),
+      pays,
+    );
+    if (ev < -0.05) {
       out.push({
         key: 'badprice',
         severity: 1,
-        headline: 'WORST-PRICED PART OF THE BOARD',
+        headline: 'BADLY PRICED FOR THIS MOMENT',
         detail:
-          `Tickets around ${band.pays.toFixed(1)}x measured ${(band.ev * 100).toFixed(1)}% ` +
-          `per dollar over ${band.n.toLocaleString()} bets — the weakest band there is.`,
+          `At ${pays.toFixed(1)}x with ${Math.round(secondsLeft)}s left this measures ` +
+          `${(ev * 100).toFixed(1)}% per dollar. The board's error shrinks as the round ` +
+          `runs, and the vig does not.`,
       });
     }
 

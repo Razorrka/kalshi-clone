@@ -1,55 +1,44 @@
-import { clamp } from '../lib/math';
+import { clamp, invNormCdf, normCdf } from '../lib/math';
 import { HOUSE_EDGE, multiplierFor } from './odds';
+import {
+  calibrationSamples,
+  fairProbability,
+  inflationCi,
+  volInflation,
+} from './calibration';
 import type { Side } from './types';
 
 /**
  * The edge hunter.
  *
- * This looks for long-shot tickets whose price is better than they deserve,
- * and it is built on a measurement rather than a hope. 120,000 independent
- * bets through the simulator — one per round, so no two share an outcome —
- * gave the realised win rate at every quoted price, and from that the real
- * expected value of every bet on the board.
+ * It looks for tickets priced better than they deserve, and what it knows is
+ * one measured fact: the board prices every side as N(d2) under a walk whose
+ * volatility is whatever it is right now and stays there, and the real spread
+ * of outcomes on this tape is wider than that. How much wider depends on how
+ * much of the round is left and on how calm the tape is — see calibration.ts,
+ * which holds the measurement and the mechanism behind it.
  *
- * The headline is worth reading before trusting a gold light: nothing here is
- * profitable. The house takes 10% of winnings, and the fat tails in the price
- * process — jumps and moving volatility, which the N(d2) quote does not model
- * — only hand back enough to cancel that at the very far end. The band that
- * pays 2x to 4x, which is where a 3x hunt naturally fishes, is the *worst* on
- * the board at roughly -5%.
+ * That has three consequences worth stating plainly, because they contradict
+ * how these markets are usually played:
  *
- * So this ranks, it does not promise. It finds the best-priced moment
- * available and says exactly what that is worth, minus sign included.
+ *   1. Long shots are underpriced and favourites are dear. Not by opinion —
+ *      it falls out of the quote using too small a volatility, which pulls
+ *      probability out of both tails and piles it in the middle.
+ *   2. The error is largest in the closing seconds and on a calm tape, and it
+ *      shrinks toward nothing over a whole round. So *when* you take a price
+ *      matters more than which price you take.
+ *   3. There is a floor. Below a 1% quote the board's multiplier stops
+ *      improving — it clamps — while the odds keep getting worse, so the far
+ *      tail is the worst bet on the board rather than the best. The hunter
+ *      will not go there.
+ *
+ * What it still is not: a promise. The house takes 10% of winnings, and that
+ * is enough to swallow the mispricing over most of the board. The window
+ * where the edge survives the vig is narrow and mostly short-dated, and the
+ * strip shows the expected value with its sign either way.
  */
 
-// =========================================================================
-// the fair price
-// =========================================================================
-
-/**
- * How often a side quoted here actually won, straight off the measurement.
- *
- * An earlier version of this fitted a smooth recalibration curve through
- * those points — logit(fair) = a + b*logit(quote), the textbook move. Run
- * against fresh seeds it scored 661.73 against the raw quote's 661.70 on
- * Brier loss: no better, marginally worse. It was a curve through noise, so
- * it is gone.
- *
- * What is left is the measurement itself, which needs no fitting and comes
- * with an interval. Between bands it interpolates; outside them it hands back
- * the quote, because there is nothing measured to say otherwise.
- */
-export function fairProbability(quoted: number): number {
-  if (!(quoted > 0) || !(quoted < 1)) return clamp(quoted, 0, 1);
-  const band = bandFor(quoted);
-  if (!band) return quoted;
-  // The band's own miss, applied to this quote. An earlier version blended
-  // toward the neighbouring bands' rates to smooth the steps, which pulled
-  // every value toward its lower neighbour and reported a 47.4% band that
-  // measured 47.06% as 46.5% — distorting the measurement it exists to
-  // report. This adds the offset that was actually observed and nothing else.
-  return clamp(quoted + (band.rate - band.quotedAvg), 1e-6, 1 - 1e-6);
-}
+export { fairProbability, volInflation } from './calibration';
 
 /** Profit per $1 staked, on average, at this price. Negative means a loser. */
 export function expectedValue(fair: number, multiplier: number): number {
@@ -69,81 +58,36 @@ export function kellyFraction(fair: number, multiplier: number): number {
 }
 
 // =========================================================================
-// what was actually measured
-// =========================================================================
-
-export interface EvBand {
-  /** Quoted probability at the low end of the band. */
-  from: number;
-  to: number;
-  /** Average multiplier bets in this band paid. */
-  pays: number;
-  /** Average price actually quoted to bets in this band. */
-  quotedAvg: number;
-  /** How often the side actually won, measured. */
-  rate: number;
-  /** Realised return per $1, over independent bets. */
-  ev: number;
-  /** Half-width of the 95% interval, in the same units. */
-  ci: number;
-  n: number;
-}
-
-/**
- * Realised expected value by quoted price, from 120,000 independent bets.
- *
- * Read the interval, not the point. The far tail looks positive and is not:
- * at 28x a handful of extra wins moves the estimate ten points, which is why
- * its interval is enormous. Everything from 15% up is reliably negative and
- * its intervals say so.
- */
-export const MEASURED_EV: EvBand[] = [
-  { from: 0.02, to: 0.05, pays: 28.3, quotedAvg: 0.035, rate: 0.0371, ev: 0.049, ci: 0.129, n: 6530 },
-  { from: 0.05, to: 0.08, pays: 14.2, quotedAvg: 0.064, rate: 0.0693, ev: -0.013, ci: 0.097, n: 5278 },
-  { from: 0.08, to: 0.11, pays: 9.6, quotedAvg: 0.094, rate: 0.1045, ev: 0.009, ci: 0.082, n: 4965 },
-  { from: 0.11, to: 0.15, pays: 7.1, quotedAvg: 0.129, rate: 0.1411, ev: -0.002, ci: 0.06, n: 6433 },
-  { from: 0.15, to: 0.2, pays: 5.3, quotedAvg: 0.174, rate: 0.1782, ev: -0.06, ci: 0.044, n: 8429 },
-  { from: 0.2, to: 0.26, pays: 4.0, quotedAvg: 0.228, rate: 0.2356, ev: -0.053, ci: 0.032, n: 10891 },
-  { from: 0.26, to: 0.33, pays: 3.2, quotedAvg: 0.294, rate: 0.3056, ev: -0.036, ci: 0.024, n: 14438 },
-  { from: 0.33, to: 0.4, pays: 2.6, quotedAvg: 0.364, rate: 0.3763, ev: -0.035, ci: 0.019, n: 17294 },
-  { from: 0.4, to: 0.45, pays: 2.2, quotedAvg: 0.424, rate: 0.4225, ev: -0.063, ci: 0.018, n: 14221 },
-  { from: 0.45, to: 0.5, pays: 2.0, quotedAvg: 0.474, rate: 0.4706, ev: -0.061, ci: 0.016, n: 15358 },
-];
-
-/** The measured band a quoted probability falls in, if any. */
-export function bandFor(quoted: number): EvBand | null {
-  return MEASURED_EV.find((b) => quoted >= b.from && quoted < b.to) ?? null;
-}
-
-/** True when the measurement cannot tell this band apart from break-even. */
-export function isBreakEven(band: EvBand): boolean {
-  return Math.abs(band.ev) <= band.ci;
-}
-
-// =========================================================================
 // picking one
 // =========================================================================
 
-/** The payout window worth hunting in. Nothing shorter, nothing sillier. */
+/** The payout window worth hunting in. Nothing shorter than this. */
 export const MIN_MULTIPLIER = 1.8;
-export const MAX_MULTIPLIER = 11;
+/**
+ * And nothing cheaper than a 1% quote.
+ *
+ * `multiplierFor` clamps the price it pays at 1%, so a side quoted at 0.4%
+ * pays exactly what a 1% side pays while landing less than half as often.
+ * Everything below the clamp is strictly dominated by the clamp itself, which
+ * is why "priced under 1%" is on the proving ground's list and comes back at
+ * a total loss.
+ */
+export const MIN_QUOTE = 0.01;
+export const MAX_MULTIPLIER = multiplierFor(MIN_QUOTE);
 /** Where the hunt is aimed when nothing better presents itself. */
 export const TARGET_MULTIPLIER = 3;
 
 /**
  * How picky to be, 0 to 1, and what expected value that demands.
  *
- * At 0 it only takes the far tail, where the measurement cannot rule out
- * break-even. Turning it up buys more signals with worse prices, which is the
- * real trade and the reason this is a slider rather than a constant.
+ * Zero means "only what the measurement says actually makes money", which is
+ * a narrow and mostly late-round set. Turning it up buys more signals at
+ * worse prices, down to the middle of the board where the vig is unanswerable.
+ * That is the real trade, and the reason this is a slider and not a constant.
  */
 export function evThresholdFor(aggression: number): number {
   const a = clamp(aggression, 0, 1);
-  // Anchored to what the measurement says is actually on the board. Inside
-  // the 1.8x-11x window the best price runs about -1% and the worst about
-  // -6%, so a threshold outside that range would either never light or never
-  // decline anything.
-  return -0.012 - a * 0.05;
+  return 0.005 - a * 0.06;
 }
 
 export type EdgeGrade = 'PRIME' | 'FAIR' | 'THIN';
@@ -156,27 +100,30 @@ export interface EdgePick {
   fair: number;
   multiplier: number;
   ev: number;
+  /** Half-width of the 95% interval on that expected value. */
+  evCi: number;
+  /** The effective volatility multiplier behind the correction. */
+  k: number;
   /** Quarter-Kelly, as a fraction of the balance. */
   stakeFraction: number;
   /** Dollars, rounded to something you would actually type. */
   stake: number;
   grade: EdgeGrade;
-  band: EvBand | null;
-  /** Why it was picked, or why nothing was. */
+  /** Independent samples behind the cell this was priced from. */
+  samples: number;
+  /** Why it was picked. */
   note: string;
 }
 
-function gradeFor(ev: number, band: EvBand | null): EdgeGrade {
-  if (band && isBreakEven(band) && ev > -0.02) return 'PRIME';
-  if (ev > -0.04) return 'FAIR';
+function gradeFor(ev: number, evCi: number): EdgeGrade {
+  if (ev - evCi > 0) return 'PRIME';
+  if (ev > 0) return 'FAIR';
   return 'THIN';
 }
 
 /** Quarter Kelly, floored at nothing and capped so one ticket cannot ruin you. */
 export function stakeFor(fair: number, multiplier: number, balance: number): number {
   const kelly = kellyFraction(fair, multiplier);
-  // Kelly is negative on every bet here, so a losing edge stakes the minimum
-  // rather than going short — you cannot sell, only decline.
   const fraction = clamp(kelly / 4, 0, 0.05);
   const raw = balance * (fraction > 0 ? fraction : 0.01);
   return Math.max(1, Math.round(raw));
@@ -188,6 +135,10 @@ export interface EdgeInput {
   aggression: number;
   /** Blocks a pick when the round is too far gone to enter. */
   tradable: boolean;
+  /** Seconds until settlement — the axis the mispricing varies most along. */
+  secondsLeft: number;
+  /** Live volatility over its long-run level. */
+  volRatio: number;
 }
 
 /**
@@ -198,22 +149,30 @@ export interface EdgeInput {
  * That makes this a filter and a grade rather than a choice between two.
  */
 export function findEdge(input: EdgeInput): EdgePick | null {
-  const { pUp, balance, aggression, tradable } = input;
+  const { pUp, balance, aggression, tradable, secondsLeft, volRatio } = input;
   if (!tradable) return null;
 
   const threshold = evThresholdFor(aggression);
+  const k = volInflation(secondsLeft, volRatio);
+  // The interval on k, carried through to an interval on the expected value.
+  const kCi = inflationCi(secondsLeft, volRatio);
+  const samples = calibrationSamples(secondsLeft, volRatio);
   let best: EdgePick | null = null;
 
   for (const side of ['up', 'down'] as Side[]) {
     const quoted = side === 'up' ? pUp : 1 - pUp;
+    if (quoted < MIN_QUOTE) continue;
     const multiplier = multiplierFor(quoted);
     if (multiplier < MIN_MULTIPLIER || multiplier > MAX_MULTIPLIER) continue;
 
-    const fair = fairProbability(quoted);
+    const fair = fairProbability(quoted, secondsLeft, volRatio);
     const ev = expectedValue(fair, multiplier);
+    // Re-price at the low end of k's own interval: the gap is what the
+    // measurement's uncertainty is worth on this particular ticket, which is
+    // far more useful than an interval on k that nobody can read off a strip.
+    const evCi = Math.abs(ev - expectedValue(priceAtK(quoted, k - kCi), multiplier));
     if (ev < threshold) continue;
 
-    const band = bandFor(quoted);
     const kelly = kellyFraction(fair, multiplier);
     const pick: EdgePick = {
       side,
@@ -221,18 +180,76 @@ export function findEdge(input: EdgeInput): EdgePick | null {
       fair,
       multiplier,
       ev,
+      evCi,
+      k,
       stakeFraction: clamp(kelly / 4, 0, 0.05),
       stake: stakeFor(fair, multiplier, balance),
-      grade: gradeFor(ev, band),
-      band,
-      note:
-        band && isBreakEven(band)
-          ? 'Best-priced band on the board — the measurement cannot tell it from break-even'
-          : `Measured at ${((band?.ev ?? ev) * 100).toFixed(1)}% per $1 over ${band?.n ?? 0} bets`,
+      grade: gradeFor(ev, evCi),
+      samples,
+      note: noteFor(ev, evCi, secondsLeft),
     };
     if (!best || pick.ev > best.ev) best = pick;
   }
   return best;
+}
+
+/** Re-prices a quote under a given volatility multiplier. */
+function priceAtK(quoted: number, k: number): number {
+  if (!(k > 0) || quoted <= 0 || quoted >= 1) return quoted;
+  if (quoted === 0.5) return 0.5;
+  const near = quoted <= 0.5 ? quoted : 1 - quoted;
+  const f = clamp(normCdf(invNormCdf(near) / k), 1e-9, 0.5);
+  return quoted <= 0.5 ? f : 1 - f;
+}
+
+function noteFor(ev: number, evCi: number, secondsLeft: number): string {
+  if (ev - evCi > 0) {
+    return secondsLeft <= 60
+      ? 'Priced above its worth, and the interval clears zero — this is the closing-seconds window'
+      : 'Priced above its worth, and the interval clears zero';
+  }
+  if (ev > 0) return 'Priced above its worth, but not by more than the measurement can resolve';
+  return 'Best price on the board, and still behind the house cut';
+}
+
+/** One row of "what every price on the board is worth, right now". */
+export interface EvRow {
+  quoted: number;
+  multiplier: number;
+  fair: number;
+  ev: number;
+  evCi: number;
+}
+
+/** The prices the sheet walks through, from the clamp out to a coin flip. */
+const CURVE_QUOTES = [0.01, 0.02, 0.03, 0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5];
+
+/**
+ * What each price on the board is worth at a given moment.
+ *
+ * The whole curve moves with the clock, which is the point: the same 30x
+ * ticket is a different bet with twenty seconds left than with ten minutes.
+ */
+export function evCurve(secondsLeft: number, volRatio: number): EvRow[] {
+  const k = volInflation(secondsLeft, volRatio);
+  const kCi = inflationCi(secondsLeft, volRatio);
+  return CURVE_QUOTES.map((quoted) => {
+    const multiplier = multiplierFor(quoted);
+    const fair = fairProbability(quoted, secondsLeft, volRatio);
+    const ev = expectedValue(fair, multiplier);
+    return {
+      quoted,
+      multiplier,
+      fair,
+      ev,
+      evCi: Math.abs(ev - expectedValue(priceAtK(quoted, k - kCi), multiplier)),
+    };
+  });
+}
+
+/** The best price on the board at this moment, and what it is worth. */
+export function bestAt(secondsLeft: number, volRatio: number): EvRow {
+  return evCurve(secondsLeft, volRatio).reduce((a, b) => (b.ev > a.ev ? b : a));
 }
 
 /** The house's cut, restated where the reasoning needs it. */

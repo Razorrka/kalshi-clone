@@ -1,5 +1,7 @@
 import { PriceEngine, VOL_PRESETS } from './priceEngine';
 import { multiplierFor, probUp } from './odds';
+import { findEdge } from './edge';
+import { volRatioOf } from './calibration';
 import type { Side } from './types';
 
 /**
@@ -225,6 +227,42 @@ export const RULES: { key: string; name: string; blurb: string; rule: Rule }[] =
       const under = Math.min(s.quoted, 1 - s.quoted);
       if (under < 0.01 || multiplierFor(under) < 6) return null;
       return s.quoted < 0.5 ? 'up' : 'down';
+    },
+  },
+  {
+    key: 'hunter',
+    name: 'The gold edge hunter, patient',
+    blurb:
+      'Backs exactly what the gold light picks at its most selective — only ' +
+      'prices the calibration says actually make money.',
+    rule: (s) => {
+      const pick = findEdge({
+        pUp: s.quoted,
+        balance: 1_000,
+        aggression: 0,
+        tradable: true,
+        secondsLeft: s.msLeft / 1_000,
+        volRatio: volRatioOf(s.vol, VOL_PRESETS.normal),
+      });
+      return pick ? pick.side : null;
+    },
+  },
+  {
+    key: 'hunterWide',
+    name: 'The gold edge hunter, wide open',
+    blurb:
+      'The same hunter with the slider all the way up, which buys far more ' +
+      'signals at far worse prices. The control for the one above.',
+    rule: (s) => {
+      const pick = findEdge({
+        pUp: s.quoted,
+        balance: 1_000,
+        aggression: 1,
+        tradable: true,
+        secondsLeft: s.msLeft / 1_000,
+        volRatio: volRatioOf(s.vol, VOL_PRESETS.normal),
+      });
+      return pick ? pick.side : null;
     },
   },
   {

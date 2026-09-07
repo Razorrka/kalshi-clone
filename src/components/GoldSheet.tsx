@@ -3,33 +3,36 @@ import { Sheet } from './Sheet';
 import { fmtMoney } from '../lib/format';
 import {
   MAX_MULTIPLIER,
-  MEASURED_EV,
   MIN_MULTIPLIER,
   VIG,
+  evCurve,
   evThresholdFor,
-  isBreakEven,
 } from '../engine/edge';
+import { CAL_SECONDS, volInflation } from '../engine/calibration';
 
 const pct = (v: number, dp = 1) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`;
 
 function describe(a: number): string {
-  if (a <= 0.2) return 'Patient — only the far tail, where the price is least bad.';
-  if (a <= 0.45) return 'Selective — the long shots, nothing near a coin flip.';
-  if (a <= 0.75) return 'Loose — most of the payout window.';
-  return 'Wide open — anything in the window, including the worst-priced bands.';
+  if (a <= 0.2) return 'Patient — only what the measurement says actually makes money.';
+  if (a <= 0.45) return 'Selective — that, plus prices a shade behind the vig.';
+  if (a <= 0.75) return 'Loose — most of the payout window, most of it negative.';
+  return 'Wide open — anything in the window, the worst-priced parts included.';
 }
+
+const clock = (s: number) => (s >= 60 ? `${Math.round(s / 60)}m` : `${Math.round(s)}s`);
 
 export function GoldSheet() {
   const store = useMarket(true);
   const gold = store.gold;
   const record = store.goldSummary;
   const threshold = evThresholdFor(store.goldAggression);
+  const curve = evCurve(store.secondsLeft, store.volRatio);
   const realised = record.staked > 0 ? record.returned / record.staked - 1 : null;
 
   return (
     <Sheet
       title="Edge hunter"
-      subtitle={`Long shots from ${MIN_MULTIPLIER.toFixed(2)}x to ${MAX_MULTIPLIER}x, priced against the measurement`}
+      subtitle={`Long shots from ${MIN_MULTIPLIER.toFixed(2)}x to ${MAX_MULTIPLIER.toFixed(1)}x, priced against the measurement`}
       onClose={() => store.closeSheet()}
     >
       {gold ? (
@@ -95,8 +98,11 @@ export function GoldSheet() {
         </div>
       </div>
       <div className="note">
-        The number beside the slider is the worst expected value it will accept.
-        Every one of them is negative, and that is not a bug in the slider.
+        The number beside the slider is the worst expected value it will
+        accept. At the patient end it is positive, so the light only comes on
+        for prices the measurement says actually make money — which is a rare
+        state, mostly late in a round. Turning it up buys signals by accepting
+        worse prices.
       </div>
 
       <div className="section-label">Its actual record</div>
@@ -127,72 +133,104 @@ export function GoldSheet() {
             </div>
           </div>
           <div className="note">
-            A long shot's record is mostly noise until there are a few hundred of
-            them. At {MEASURED_EV[2].pays.toFixed(0)}x you can lose twenty in a
-            row at no fault of the pricing, so read this against the table below
-            rather than as a verdict.
+            A long shot's record is mostly noise until there are a few hundred
+            of them. At 20x you can lose twenty in a row with nothing wrong with
+            the pricing, so read this against the tables below rather than as a
+            verdict.
           </div>
         </>
       )}
 
-      <div className="section-label">What every price is actually worth</div>
+      <div className="section-label">
+        What every price is worth right now · {clock(store.secondsLeft)} left
+      </div>
       <div className="gold-table">
         <div className="gold-row head">
           <span>Book</span>
           <span className="tnum">Pays</span>
-          <span className="tnum">Won</span>
+          <span className="tnum">Really</span>
           <span className="tnum">Per $1</span>
         </div>
-        {MEASURED_EV.map((b) => (
-          <div className={`gold-row${isBreakEven(b) ? ' even' : ''}`} key={b.from}>
-            <span>
-              {(b.from * 100).toFixed(0)}–{(b.to * 100).toFixed(0)}%
-            </span>
-            <span className="tnum">{b.pays.toFixed(1)}x</span>
-            <span className="tnum">{(b.rate * 100).toFixed(1)}%</span>
-            <span className={`tnum ${isBreakEven(b) ? 'even-txt' : 'neg'}`}>
-              {pct(b.ev)} <span className="ci">±{(b.ci * 100).toFixed(0)}</span>
+        {curve.map((row) => (
+          <div className={`gold-row${row.ev > 0 ? ' even' : ''}`} key={row.quoted}>
+            <span className="tnum">{(row.quoted * 100).toFixed(0)}%</span>
+            <span className="tnum">{row.multiplier.toFixed(1)}x</span>
+            <span className="tnum">{(row.fair * 100).toFixed(2)}%</span>
+            <span className={`tnum ${row.ev > 0 ? 'even-txt' : 'neg'}`}>
+              {pct(row.ev)} <span className="ci">±{(row.evCi * 100).toFixed(1)}</span>
             </span>
           </div>
         ))}
       </div>
+      <div className="note">
+        "Really" is the rate that price actually lands at, measured. The gap is
+        the whole edge, and it closes as the round runs — which is why this
+        table is drawn for the clock as it stands rather than once for all time.
+      </div>
+
+      <div className="section-label">How wrong the board is, by the clock</div>
+      <div className="gold-table">
+        <div className="gold-row head">
+          <span>Left</span>
+          <span className="tnum">Calm tape</span>
+          <span className="tnum">Normal</span>
+          <span className="tnum">Wild</span>
+        </div>
+        {CAL_SECONDS.map((sec) => (
+          <div className="gold-row" key={sec}>
+            <span className="tnum">{clock(sec)}</span>
+            <span className="tnum">{volInflation(sec, 0.35).toFixed(3)}x</span>
+            <span className="tnum">{volInflation(sec, 1).toFixed(3)}x</span>
+            <span className="tnum">{volInflation(sec, 2.5).toFixed(3)}x</span>
+          </div>
+        ))}
+      </div>
+      <div className="note">
+        The board prices every ticket as if the tape's volatility were exactly
+        what it is now and stayed there. The real spread of outcomes is this
+        much wider. It is worst with seconds left on a calm tape — a
+        microstructure bounce is a fixed fraction of a basis point whatever the
+        volatility, so it is a large share of a small move — and it fades to
+        almost nothing over a whole round.
+      </div>
 
       <div className="section-label">Read this before you trust the gold</div>
       <div className="note">
-        <strong style={{ color: 'var(--muted)' }}>Nothing here is profitable.</strong>{' '}
-        That table is 120,000 bets — one per round, so no two share an outcome —
-        and every band with a tight enough interval to judge is negative. The
-        house takes {Math.round(VIG * 100)}% of winnings and the price process's
-        fat tails only hand back enough to cancel that at the very far end.
+        <strong style={{ color: 'var(--muted)' }}>The edge is real and it is small.</strong>{' '}
+        The board's price is wrong in a measurable direction, but the house
+        takes {Math.round(VIG * 100)}% of winnings and that swallows the error
+        over most of the board. What survives is a narrow window, mostly in the
+        closing stretch of a round, and the strip shows its expected value with
+        the sign either way.
       </div>
       <div className="note">
-        <strong style={{ color: 'var(--muted)' }}>3x is the worst place to fish.</strong>{' '}
-        The bands that pay 2x to 4x measure about −4% to −6% per dollar, the
-        weakest on the board. The bands that pay 7x to 28x come in at roughly
-        break-even, because jumps and moving volatility put more weight in the
-        tail than the N(d2) quote models. If you want the least-bad long shot,
-        it is further out than 3x, not at it.
+        <strong style={{ color: 'var(--muted)' }}>3x is still a bad place to fish.</strong>{' '}
+        The mispricing grows the further into the tail you go, but the vig is a
+        flat cut of winnings, so the two only cross well past 3x. The table
+        above marks where they cross for the clock as it stands — and that
+        point moves toward you as the round runs out.
       </div>
       <div className="note">
-        <strong style={{ color: 'var(--muted)' }}>Read the interval, not the number.</strong>{' '}
-        The 2–5% band shows {pct(MEASURED_EV[0].ev)} and means nothing: at{' '}
-        {MEASURED_EV[0].pays.toFixed(0)}x a handful of extra wins moves the
-        estimate ten points, which is why its interval is ±{(MEASURED_EV[0].ci * 100).toFixed(0)}.
-        Bands marked even are the ones the measurement genuinely cannot separate
-        from break-even.
+        <strong style={{ color: 'var(--muted)' }}>Never below a 1% quote.</strong>{' '}
+        The board's multiplier clamps at 1%, so a side quoted at 0.4% pays what
+        a 1% side pays and lands less than half as often. Everything under the
+        clamp is strictly worse than the clamp, and the hunter will not take it.
+        The proving ground has that rule on its list if you want to watch it
+        lose.
       </div>
       <div className="note">
-        <strong style={{ color: 'var(--muted)' }}>A fitted curve was tried and thrown out.</strong>{' '}
-        Recalibrating the quote in log-odds is the textbook move, and against
-        fresh seeds it scored 661.73 on Brier loss against the raw quote's
-        661.70 — no better. So the fair price here is the raw measurement, not a
-        curve through it, and the quote it is correcting turns out to be good.
+        <strong style={{ color: 'var(--muted)' }}>An older version of this was
+        incoherent.</strong>{' '}
+        It corrected each price with its own measured offset, which put Up at
+        30% and Down at 70% together at 101.16% — not a pair of probabilities.
+        The correction is now a single volatility multiplier, so the two sides
+        of a market always sum to exactly one.
       </div>
       <div className="note">
         Stakes are quarter-Kelly where Kelly is positive and a 1% token where it
-        is not, which is every price on this board. None of this transfers to a
-        real market: the edge measured here is a property of this simulator's
-        pricing, not of Bitcoin.
+        is not. None of this transfers to a real exchange: the edge measured
+        here is a property of how this simulator prices its own tape, not of
+        Bitcoin.
       </div>
     </Sheet>
   );

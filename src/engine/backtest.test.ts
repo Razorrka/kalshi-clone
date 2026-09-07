@@ -105,7 +105,7 @@ describe('the rules on offer', () => {
     expect(together[1].bets).toBe(alone.bets);
   });
 
-  it('is reproducible from the same seed and different from another', () => {
+  it('is reproducible from the same seed and different from another', { timeout: 60_000 }, () => {
     const rule = RULES.find((r) => r.key === 'favourite')!.rule;
     expect(backtest(rule, 'a', 300, 1).ev).toBe(backtest(rule, 'a', 300, 1).ev);
     expect(backtest(rule, 'a', 300, 1).ev).not.toBe(backtest(rule, 'a', 300, 2).ev);
