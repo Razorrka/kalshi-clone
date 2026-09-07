@@ -1,6 +1,8 @@
 import { useMarket } from '../store/useMarket';
 import { Sheet } from './Sheet';
-import { FLIP_HORIZON_MS, MEASURED_AUC, touchProbability } from '../engine/flip';
+import { FLIP_HORIZON_MS, MEASURED_AUC } from '../engine/flip';
+import { touchProbabilityAt } from '../engine/calibration';
+import { normCdf } from '../lib/math';
 
 const NAMES: Record<string, string> = {
   velocity: 'Price velocity',
@@ -96,15 +98,26 @@ export function FlipSheet() {
       <div className="section-label">Where the number comes from</div>
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>
-          The geometry first: {pct(flip.baseline)}.
+          The geometry first:{' '}
+          {pct(2 * normCdf(-Math.abs(flip.features.horizonGap)))}.
         </strong>{' '}
         Price is <span className="tnum">{flip.features.horizonGap.toFixed(2)}</span>{' '}
-        standard deviations of the next {seconds} seconds clear of the target. For a
-        walk with no memory the chance of touching a level that far off is exactly
-        2 × N(−z) — the reflection principle, not a fitted curve. Every path that
-        touches and finishes above pairs with one that touches and finishes below,
-        so touching is twice finishing beyond. That is the {pct(flip.baseline)}, and
-        it is the honest core of this screen.
+        standard deviations of the next {seconds} seconds clear of the target.
+        For a walk with no memory the chance of touching a level that far off
+        would be exactly 2 × N(−z) — the reflection principle: every path that
+        touches and finishes above pairs with one that touches and finishes
+        below, so touching is twice finishing beyond.
+      </div>
+      <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>
+          Then the correction: {pct(flip.baseline)}.
+        </strong>{' '}
+        The formula assumes the target is watched without blinking, and this app
+        checks once a second — a cross that comes straight back is not a flip
+        here, so near the target it promises flips that never register. It also
+        assumes no jumps, and this tape jumps. Both were measured, over
+        1,984,000,000 samples, and this is what actually happens. It is the
+        honest core of this screen.
       </div>
       <div className="note">
         The sixteen inputs then argue at the margin, moving it to{' '}
@@ -133,8 +146,8 @@ export function FlipSheet() {
       <div className="section-label">What these are actually worth</div>
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>Measured, not asserted.</strong> Each
-        input was scored over 72,540 samples from 260 simulated rounds, on whether it
-        predicts a flip inside the next minute once the gap is conditioned out. Two
+        input was scored on whether it predicts a flip inside the next minute
+        once the gap is conditioned out. Two
         of them carry real information — <em>failed breakout</em> at 0.68 and{' '}
         <em>price rejection</em> at 0.68, where 0.50 is a coin flip. Both describe
         the path: a target already tested and not held is genuinely more likely to be
@@ -151,17 +164,38 @@ export function FlipSheet() {
         make this screen a very convincing liar.
       </div>
       <div className="note">
-        <strong style={{ color: 'var(--muted)' }}>Weights were fitted, then cut.</strong>{' '}
-        A logistic regression over those samples, with the geometry as a fixed offset
-        so the inputs could only earn weight for what it does not already say. At full
-        strength they scored 0.893 against the geometry's own 0.918 — worse. Shrinking
-        them found the peak at a tenth: 0.9181 against 0.9178. They ship at a tenth,
-        which is the honest size of them. The pattern match is drawing on{' '}
+        <strong style={{ color: 'var(--muted)' }}>The weights were refitted, and
+        they came back as nothing.</strong>{' '}
+        The old ones were fitted on 260 rounds — and every sample inside a round
+        rides the same price path, so that is an effective sample of about 260
+        for sixteen inputs, which is enough to fit noise. Refitted with the
+        penalty chosen by cross-validation grouped <em>by round</em>, the
+        sixteen together are worth +0.00009 of AUC over the geometry alone, and
+        several of the old signs were simply backwards: <em>price rejection</em>{' '}
+        was fitted at +0.49 and comes back negative. They now ship at their
+        fitted size, which is almost zero, and the reasons above are ranked by
+        how far each input has actually moved rather than by a weight that does
+        not mean anything. The pattern match is drawing on{' '}
         <span className="tnum">{store.flipMemorySize}</span> resolved setups.
       </div>
       <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>So the geometry is the
+        detector</strong>{' '}
+        — and it was worth measuring properly. The textbook anchor, 2·N(−|z|),
+        assumes the target is watched continuously; this app checks once a
+        second, so a cross that comes straight back never registers, and near
+        the target the formula promised flips that do not happen — 7.6 points
+        too high at a quarter of a standard deviation with fifteen seconds to
+        run. Far out it ran the other way, because jumps reach where a
+        lognormal does not. Both are now measured, over 1,984,000,000 samples,
+        and the fitted correction reproduces the known
+        Broadie–Glasserman–Kou constant for a discretely watched barrier to
+        three significant figures.
+      </div>
+      <div className="note">
         A flip warning is not a trade. At one standard deviation clear the chance of
-        being touched is already {pct(touchProbability(1))} — being "comfortably
+        being touched is already{' '}
+        {pct(touchProbabilityAt(1, FLIP_HORIZON_MS / 1_000, store.volRatio))} — being "comfortably
         ahead" in a 15-minute market mostly means the market has not got round to you
         yet.
       </div>
