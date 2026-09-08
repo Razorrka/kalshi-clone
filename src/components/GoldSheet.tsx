@@ -13,10 +13,10 @@ import { CAL_SECONDS, volInflation } from '../engine/calibration';
 const pct = (v: number, dp = 1) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`;
 
 function describe(a: number): string {
-  if (a <= 0.2) return 'Patient — only what the measurement says actually makes money.';
-  if (a <= 0.45) return 'Selective — that, plus prices a shade behind the vig.';
-  if (a <= 0.75) return 'Loose — most of the payout window, most of it negative.';
-  return 'Wide open — anything in the window, the worst-priced parts included.';
+  if (a <= 0.2) return 'Patient — the long end of the window, where the board is least wrong.';
+  if (a <= 0.45) return 'Selective — that, plus the better of the middle.';
+  if (a <= 0.75) return 'Loose — most of the window, mostly two to four times.';
+  return 'Wide open — anything in the window, the worst-priced rungs included.';
 }
 
 const clock = (s: number) => (s >= 60 ? `${Math.round(s / 60)}m` : `${Math.round(s)}s`);
@@ -32,7 +32,7 @@ export function GoldSheet() {
   return (
     <Sheet
       title="Edge hunter"
-      subtitle={`Long shots from ${MIN_MULTIPLIER.toFixed(2)}x to ${MAX_MULTIPLIER.toFixed(1)}x, priced against the measurement`}
+      subtitle={`Flips and reversals from ${MIN_MULTIPLIER.toFixed(2)}x to ${MAX_MULTIPLIER.toFixed(0)}x, priced against the measurement`}
       onClose={() => store.closeSheet()}
     >
       {gold ? (
@@ -98,25 +98,30 @@ export function GoldSheet() {
         </div>
       </div>
       <div className="note">
-        <strong style={{ color: 'var(--muted)' }}>How often it lights.</strong>{' '}
-        Watched second by second over 600 rounds: 1.6% of the time at the
-        patient end, 5.8% a quarter up, 20.6% halfway, 38.8% where it starts,
-        53.9% at three quarters, 87.3% wide open. The slider is spaced by that measurement
-        rather than drawn as a straight line, because almost every price on
-        this board sits between −4.5% and −6.5% — a bar moving in equal steps
-        does nothing across most of its travel and then everything at the end.
-        The patient setting spends 6.3% of the final minute lit against 1.6% of
-        a round overall, four times as often, because that is where the board
-        is wrong. Wide open runs the other way, 33.5% late against 87.3%
-        overall, because what it takes is near coin flips and those are
-        everywhere.
+        <strong style={{ color: 'var(--muted)' }}>How often it lights, and on
+        what.</strong>{' '}
+        Watched second by second over 500 rounds: 2.9% of the time at the
+        patient end, 16.5% a quarter up, 37.9% halfway, 54.0% where it starts,
+        71.3% wide open. The slider is spaced by that measurement rather than
+        drawn as a straight line, because almost every price in this window
+        sits between −4.5% and −6.5% — a bar moving in equal steps does nothing
+        across most of its travel and then everything at the end.
+      </div>
+      <div className="note">
+        And it fires on the payouts you came for. At the setting it starts on,
+        the median ticket it picks pays <span className="tnum">2.4x</span>, and{' '}
+        <span className="tnum">66%</span> of its picks land between 2x and
+        4.5x. Turn the slider down and it holds out for the long end of the
+        window instead — a median of 6.5x — because that is where the board's
+        error is largest.
       </div>
       <div className="note">
         The number beside the slider is the worst expected value it will
-        accept. At the patient end it is positive, so the light only comes on
-        for prices the measurement says actually make money — which is a rare
-        state, mostly late in a round. Turning it up buys signals by accepting
-        worse prices.
+        accept. It is negative all the way along, because every price in this
+        window is — what the slider buys is how close to the best of a bad set
+        you insist on. At the patient end it holds out for the long end of the
+        window and fires rarely; turning it up buys signals by accepting worse
+        prices, and hands you the two-to-four-times tickets more often.
       </div>
 
       <div className="section-label">Its actual record</div>
@@ -234,37 +239,67 @@ export function GoldSheet() {
         which would be a precision this does not have.
       </div>
       <div className="note">
-        <strong style={{ color: 'var(--muted)' }}>It was checked end to end.</strong>{' '}
+        <strong style={{ color: 'var(--muted)' }}>What this window is for.</strong>{' '}
+        Flips and reversals, which pay two to four times. An earlier version
+        opened the window all the way to the multiplier clamp because that is
+        where the measurement says expected value finally beats the vig — and
+        what it then found were ninety-to-one lottery tickets. Those are a
+        different bet. The window tops out at{' '}
+        {MAX_MULTIPLIER.toFixed(0)}x whatever the tail is worth, and inside it
+        the job is to find the best-priced moment rather than to refuse to
+        play.
+      </div>
+      <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>Most of it loses, and here is
+        where it does not.</strong>{' '}
+        The house takes {Math.round(VIG * 100)}% of winnings, and on an
+        ordinary tape every price in this window is behind that
+        — the best of them about −1% and the worst about −6%. The exception is
+        the corner you are probably hunting anyway: a tape that has gone quiet
+        near the target with seconds to run. The best price in the window
+        measures <span className="tnum">+25.5%</span> with 15 seconds left on a
+        calm tape and <span className="tnum">+3.2%</span> with a minute, against{' '}
+        <span className="tnum">−1.1%</span> and <span className="tnum">−4.2%</span>{' '}
+        at ordinary volatility. When the tape stops moving the board keeps
+        pricing off a volatility that is not what happens next.
+      </div>
+      <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>Checked end to end, in this
+        window.</strong>{' '}
         Not "the model predicts better" — the tickets the light actually picks,
-        settled. Over 2,800,000 rounds with one bet each, taken at the first
+        settled. Over 700,000 rounds with one bet each, taken at the first
         moment the hunter fired, the patient setting returned{' '}
-        <span className="tnum">+2.10% ± 0.97</span> per dollar across 2.56
-        million bets, against the +1.20% it predicted before the run. Halfway
-        up the slider: −0.84% ± 0.59. Wide open: −5.18% ± 0.11. The slider does
-        what it says, and the model is conservative rather than flattering.
+        <span className="tnum">−4.85% ± 0.70</span> per dollar across 626,759
+        bets, against the −4.66% it predicted before the run. Wide open:{' '}
+        <span className="tnum">−5.37% ± 0.22</span>. The model is honest about
+        what it is picking; what it is picking still loses.
       </div>
       <div className="note">
-        <strong style={{ color: 'var(--muted)' }}>The edge is real and it is small.</strong>{' '}
-        The board's price is wrong in a measurable direction, but the house
-        takes {Math.round(VIG * 100)}% of winnings and that swallows the error
-        over most of the board. What survives is a narrow window, mostly in the
-        closing stretch of a round, and the strip shows its expected value with
-        the sign either way.
+        <strong style={{ color: 'var(--muted)' }}>That is the price of this
+        window.</strong>{' '}
+        Opened to the multiplier clamp instead, the same hunter measured{' '}
+        <span className="tnum">+2.10% ± 0.97</span> over 2.8 million rounds —
+        genuinely profitable, and entirely on ninety-to-one tickets that win
+        about once in fifty. Trading two-to-four-times reversals costs roughly
+        five percent a ticket against that. Both numbers are real; which one
+        you want is a choice about what you came here to do, and the slider
+        does not change it.
       </div>
       <div className="note">
-        <strong style={{ color: 'var(--muted)' }}>3x is still a bad place to fish.</strong>{' '}
-        The mispricing grows the further into the tail you go, but the vig is a
-        flat cut of winnings, so the two only cross well past 3x. The table
-        above marks where they cross for the clock as it stands — and that
-        point moves toward you as the round runs out.
+        <strong style={{ color: 'var(--muted)' }}>3x is the worst rung on this
+        ladder.</strong>{' '}
+        The mispricing grows the further into the tail you go, and the vig is a
+        flat cut of winnings, so the two do not cross until well past this
+        window. That leaves its middle — right where 3x sits — as the weakest
+        price on it. The long end of the window is consistently the best of a
+        bad set, which is why the light picks it when you are being picky.
       </div>
       <div className="note">
-        <strong style={{ color: 'var(--muted)' }}>Never below a 1% quote.</strong>{' '}
-        The board's multiplier clamps at 1%, so a side quoted at 0.4% pays what
-        a 1% side pays and lands less than half as often. Everything under the
-        clamp is strictly worse than the clamp, and the hunter will not take it.
-        The proving ground has that rule on its list if you want to watch it
-        lose.
+        <strong style={{ color: 'var(--muted)' }}>What the grade means.</strong>{' '}
+        Not "this wins" — almost nothing here does. PRIME means this moment is
+        in roughly the best quarter of the moments the light comes on for, THIN
+        that it is in the worst half. The number beside it is the real expected
+        value with its real sign, and PRIME is the only grade that pulses.
       </div>
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>An older version of this was

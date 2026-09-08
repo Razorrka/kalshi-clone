@@ -100,16 +100,22 @@ describe('expected value and staking', () => {
 });
 
 describe('what the board is worth, moment to moment', () => {
-  it('walks the whole payout window', () => {
+  it('walks the payout window, end to end', () => {
     const rows = evCurve(60, 1);
     expect(rows.length).toBeGreaterThan(5);
-    expect(rows[0].quoted).toBe(MIN_QUOTE);
-    expect(rows[rows.length - 1].quoted).toBe(0.5);
+    // Every rung is a price the hunter could actually take: 11x at one end,
+    // 1.8x at the other. It used to start at a 1% quote — a 90x ticket, well
+    // outside the window and never on offer.
+    for (const r of rows) {
+      expect(r.multiplier).toBeLessThanOrEqual(MAX_MULTIPLIER + 0.5);
+      expect(r.multiplier).toBeGreaterThanOrEqual(MIN_MULTIPLIER - 0.1);
+    }
+    expect(rows[0].multiplier).toBeGreaterThan(rows[rows.length - 1].multiplier);
   });
 
-  it('gets better the further out the payout, at any moment', () => {
+  it('gets better the further out the payout, inside the window', () => {
     // The mispricing grows into the tail while the vig stays a flat cut of
-    // winnings, so the two only cross well past 3x.
+    // winnings. Inside this window that means the long end is the least bad.
     for (const s of [15, 60, 240]) {
       const rows = evCurve(s, 1);
       expect(rows[0].ev).toBeGreaterThan(rows[rows.length - 1].ev);
@@ -120,26 +126,37 @@ describe('what the board is worth, moment to moment', () => {
     expect(bestAt(15, 1).ev).toBeGreaterThan(bestAt(900, 1).ev);
   });
 
-  it('is worst around 3x — worse even than a coin flip', () => {
-    // The single most useful thing the measurement says, and the opposite of
-    // where a long-shot hunt naturally fishes. The house cut is a flat share
-    // of winnings, so it costs more the longer the odds; the mispricing also
-    // grows into the tail, but faster. The two cross somewhere past 3x, which
-    // leaves the low end of the payout window as the worst part of the board.
-    for (const s of [15, 60, 900]) {
+  it('is worst around 3x — worse even than the short end of the window', () => {
+    // The most useful thing the measurement says, and the opposite of where a
+    // long-shot hunt naturally fishes. The house cut is a flat share of
+    // winnings, so it costs more the longer the odds; the mispricing also
+    // grows into the tail, but faster. The two cross out past this window,
+    // which leaves its middle — right where 3x sits — as its worst part.
+    for (const s of [60, 240, 900]) {
       const rows = evCurve(s, 1);
       const worst = rows.reduce((a, b) => (b.ev < a.ev ? b : a));
       expect(worst.multiplier).toBeGreaterThan(2.4);
-      expect(worst.multiplier).toBeLessThan(4.2);
+      expect(worst.multiplier).toBeLessThan(4.6);
       expect(worst.ev).toBeLessThan(rows[rows.length - 1].ev);
     }
   });
 
-  it('never claims a coin flip is anything but the house cut', () => {
-    for (const s of [15, 900]) {
-      expect(expectedValue(0.5, multiplierFor(0.5))).toBeCloseTo(-HOUSE_EDGE / 2, 9);
-      expect(evCurve(s, 1)[evCurve(s, 1).length - 1].ev).toBeCloseTo(-HOUSE_EDGE / 2, 9);
+  it('never claims a winner on an ordinary tape', () => {
+    // The window stops at 11x and the board's mispricing does not overtake the
+    // vig until well past that, so at normal volatility every rung here loses
+    // money and the hunter's job is to find the least bad moment.
+    for (const s of [15, 60, 240, 900]) {
+      for (const row of evCurve(s, 1)) expect(row.ev).toBeLessThan(0);
     }
+    expect(expectedValue(0.5, multiplierFor(0.5))).toBeCloseTo(-HOUSE_EDGE / 2, 9);
+  });
+
+  it('does reach a winner on a becalmed tape in the closing seconds', () => {
+    // The one corner of this window where the mispricing beats the vig: when
+    // the tape has stopped moving, a fixed microstructure bounce is most of
+    // what is left, and the board is pricing off a volatility that is not
+    // what happens next.
+    expect(evCurve(15, 0.3).some((r) => r.ev > 0)).toBe(true);
   });
 });
 
@@ -153,10 +170,9 @@ describe('picking a ticket', () => {
 
   it('backs the underdog, whichever side it is', () => {
     // The favourite's payout is under the window's floor by construction, so
-    // there is never a choice between the two. Run wide open, because at the
-    // patient end a 5% shot with a minute left is correctly declined.
-    expect(at(0.05, { aggression: 1 })?.side).toBe('up');
-    expect(at(0.95, { aggression: 1 })?.side).toBe('down');
+    // there is never a choice between the two.
+    expect(at(0.2, { aggression: 1 })?.side).toBe('up');
+    expect(at(0.8, { aggression: 1 })?.side).toBe('down');
   });
 
   it('never returns anything outside the payout window', () => {
@@ -190,8 +206,12 @@ describe('picking a ticket', () => {
 
   it('demands more of a price the lower the slider goes', () => {
     expect(evThresholdFor(0)).toBeGreaterThan(evThresholdFor(1));
-    // At the patient end it only takes what actually makes money.
-    expect(evThresholdFor(0)).toBeGreaterThan(0);
+    // Every price in this window loses money, so the bar is negative all the
+    // way along. What the slider buys is how close to the best of a bad set
+    // you insist on, and it has to span what the window contains.
+    expect(evThresholdFor(0)).toBeLessThan(0);
+    expect(evThresholdFor(0)).toBeGreaterThan(-0.05);
+    expect(evThresholdFor(1)).toBeLessThan(-0.06);
   });
 
   it('lights up more often with seconds left than with minutes', () => {
@@ -205,9 +225,10 @@ describe('picking a ticket', () => {
   });
 
   it('says what a pick is worth, sign and interval included', () => {
-    const pick = at(0.03, { aggression: 1 });
+    const pick = at(0.2, { aggression: 1 });
     expect(pick).not.toBeNull();
     expect(Number.isFinite(pick!.ev)).toBe(true);
+    expect(pick!.ev).toBeLessThan(0);
     expect(pick!.evCi).toBeGreaterThan(0);
     expect(pick!.samples).toBeGreaterThan(0);
     expect(pick!.k).toBeGreaterThan(1);
@@ -276,27 +297,23 @@ describe('does the correction hold on data it never saw', () => {
   });
 });
 
-describe('does the hunter actually make money', () => {
+describe('what the hunter actually returns', () => {
   /**
-   * The end-to-end claim, and the only one that matters: not "the model
-   * predicts better" but "the tickets it picks come back positive".
+   * The end-to-end claim, and it is not the one this used to make.
    *
-   * One bet per round, taken at the FIRST moment the hunter's condition is
-   * met. First passage is a stopping time, so what the price does afterwards
-   * is independent of the decision to stop there — picking the best-looking
-   * moment in a round instead would condition on the path and flatter itself.
+   * With the window opened to the multiplier clamp the hunter picked 90x
+   * lottery tickets, and over 2,800,000 rounds those returned +2.10% ± 0.97.
+   * That was true and it was the wrong product: flips and reversals pay two to
+   * four times, and a ninety-to-one shot is a different bet. The window is
+   * back at 1.8x-11x, where the board's mispricing never overtakes the vig, so
+   * what this pins now is that the hunter loses money slowly and honestly —
+   * and beats taking any old price in the window.
    *
-   * Measured this way over 2,800,000 rounds — 2,557,404 bets — the patient
-   * setting returned +2.10% ± 0.97 per dollar against a prediction of +1.20%,
-   * so its interval clears zero by four standard errors and the model is
-   * conservative rather than flattering. Halfway up the slider it returned
-   * −0.84% ± 0.59 against a prediction of −2.03%, and wide open −5.18% ± 0.11
-   * against −4.95%. A 700,000-round run beforehand gave +2.27% ± 1.94. This runs
-   * a small slice of that: too few bets to confirm the sign, but enough to
-   * catch the pipeline breaking — a hunter that stopped firing, or started
-   * firing on the wrong side, or lost its stake sizing.
+   * One bet per round, at the FIRST moment the hunter fires. First passage is
+   * a stopping time, so what the price does afterwards is independent of the
+   * decision to stop there.
    */
-  it('picks tickets whose realised return tracks what it predicted', { timeout: 300_000 }, () => {
+  it('loses less than the window it fishes in', { timeout: 300_000 }, () => {
     const ROUND_MS = 15 * 60_000;
     const STEP = 60;
     const LOCK = 5_000;
@@ -336,17 +353,17 @@ describe('does the hunter actually make money', () => {
       n++;
     }
 
-    // It has to fire. A calibration change that quietly switched the light off
-    // would otherwise pass every other test in this file.
-    expect(n).toBeGreaterThan(2_000);
-    // Everything it takes is a price it believes is profitable.
-    expect(predicted / n).toBeGreaterThan(0);
-    // And the realised return is in the same country. The bound is loose on
-    // purpose: at 60x a few hundred bets swing tens of points, which is the
-    // lesson the proving ground exists to teach and not something to pretend
-    // away with a tight assertion here.
-    expect(realised / n).toBeGreaterThan(-0.5);
-    expect(realised / n).toBeLessThan(0.6);
+    // It has to fire. A change that quietly switched the light off would
+    // otherwise pass every other test in this file.
+    expect(n).toBeGreaterThan(300);
+    // Everything it takes is a loser, and it says so before you take it.
+    expect(predicted / n).toBeLessThan(0);
+    expect(predicted / n).toBeGreaterThan(-0.05);
+    // And the realised return is in the same country. Loose on purpose: these
+    // are 6x tickets and a few hundred of them swing tens of points, which is
+    // the lesson the proving ground exists to teach.
+    expect(realised / n).toBeGreaterThan(-0.55);
+    expect(realised / n).toBeLessThan(0.4);
   });
 });
 
@@ -365,29 +382,25 @@ describe('the interval it quotes', () => {
     }
   });
 
-  it('downgrades an edge it cannot separate from zero', () => {
-    // PRIME has to mean the interval clears zero, so an edge smaller than the
-    // model's own error must not get it.
-    let prime = 0;
-    let fair = 0;
+  it('grades by where a price sits among what comes up', () => {
+    // At normal volatility every price in this window loses money, so the
+    // grade cannot mean "wins" — it means where this sits among the moments
+    // the light comes on for, and a better grade must always be a better
+    // price. (On a becalmed tape in the closing seconds the window does reach
+    // genuinely positive prices, which is why this does not assert the sign.)
+    const seen: Record<string, number[]> = { PRIME: [], FAIR: [], THIN: [] };
     for (const s of [10, 20, 45, 120, 600]) {
       for (const v of [0.3, 0.6, 1, 1.6, 2.5]) {
-        for (let p = 0.01; p < 0.5; p += 0.005) {
-          const pick = findEdge({ ...base, pUp: p, aggression: 0, secondsLeft: s, volRatio: v });
+        for (let p = 0.02; p < 0.6; p += 0.005) {
+          const pick = findEdge({ ...base, pUp: p, aggression: 1, secondsLeft: s, volRatio: v });
           if (!pick) continue;
-          if (pick.grade === 'PRIME') {
-            prime++;
-            expect(pick.ev - pick.evCi).toBeGreaterThan(0);
-          }
-          if (pick.grade === 'FAIR') {
-            fair++;
-            expect(pick.ev).toBeGreaterThan(0);
-          }
+          seen[pick.grade].push(pick.ev);
         }
       }
     }
-    expect(prime).toBeGreaterThan(0);
-    expect(fair).toBeGreaterThan(0);
+    for (const g of ['PRIME', 'FAIR', 'THIN']) expect(seen[g].length).toBeGreaterThan(0);
+    expect(Math.min(...seen.PRIME)).toBeGreaterThan(Math.max(...seen.FAIR));
+    expect(Math.min(...seen.FAIR)).toBeGreaterThan(Math.max(...seen.THIN));
   });
 });
 
@@ -422,10 +435,13 @@ describe('the ladder the sheet draws', () => {
     }
   });
 
-  it('always has something to show at the far end', () => {
-    // A ladder where nothing is ever lit is the bug this replaced.
+  it('always has something lit at the loose end', () => {
+    // A ladder where nothing is ever lit is the bug this replaced. Nothing in
+    // this window is profitable, so the test is against the slider's bar
+    // rather than against zero.
+    const th = evThresholdFor(1);
     for (const s of [15, 60, 240, 900]) {
-      expect(evCurve(s, 1).filter((r) => r.ev > 0).length).toBeGreaterThan(0);
+      expect(evCurve(s, 1).filter((r) => r.ev >= th).length).toBeGreaterThan(0);
     }
   });
 });

@@ -172,15 +172,23 @@ export function ProvingSheet() {
       </div>
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>What this tool cannot settle.</strong>{' '}
-        Twenty thousand rounds gives the hunter about 700 bets at 50x, which
-        cannot tell +13% from −50%. Run away from here over 2,800,000 rounds,
-        sampled at the moments it actually fires, it came in at{' '}
-        <span className="tnum">+2.10% ± 0.97</span> across 2.56 million bets —
-        against a prediction of +1.20% made before the run. Its interval clears
-        zero by four standard errors, the only rule on this list that does, and
-        the prediction was conservative rather than flattering. This screen is
-        honest about not being able to show you that; a tool that claimed it
-        could would be lying about something else.
+        Twenty thousand rounds gives a rule that fishes long shots a few
+        hundred bets, which cannot tell +13% from −50%. Run away from here over
+        700,000 rounds, sampled at the moments it actually fires, the hunter
+        came in at <span className="tnum">−4.85% ± 0.70</span> across 626,759
+        bets, against a prediction of −4.66% made before the run — a good
+        forecast of a losing bet.
+      </div>
+      <div className="note">
+        <strong style={{ color: 'var(--muted)' }}>The window is the whole
+        result.</strong>{' '}
+        With the payout window opened past 11x to the multiplier clamp, the
+        same hunter measured <span className="tnum">+2.10% ± 0.97</span> over
+        2.8 million rounds — four standard errors clear of zero, and every bit
+        of it on ninety-to-one tickets. Capped back at 11x, where flips and
+        reversals live, it loses about five percent a ticket. Nothing about the
+        model changed between those two numbers; only what it was allowed to
+        buy.
       </div>
       <div className="note">
         <strong style={{ color: 'var(--muted)' }}>What it settles easily.</strong>{' '}

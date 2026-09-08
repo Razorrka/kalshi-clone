@@ -61,19 +61,36 @@ export function kellyFraction(fair: number, multiplier: number): number {
 // picking one
 // =========================================================================
 
-/** The payout window worth hunting in. Nothing shorter than this. */
+/**
+ * The payout window worth hunting in.
+ *
+ * This is a choice about what you are here to trade, not about where the
+ * measurement says the numbers are best. Those are different questions and
+ * they have different answers: expected value on this board is least bad in
+ * the far tail, out past 20x, and an earlier version of this opened the window
+ * all the way to the multiplier clamp because of that. What it then found were
+ * ninety-to-one lottery tickets — which is a different bet from the one this
+ * is for. Flips and reversals pay two to four times. That is the trade, so
+ * that is the window, and inside it the job is to find the best-priced moment
+ * rather than to refuse to play.
+ */
 export const MIN_MULTIPLIER = 1.8;
 /**
- * And nothing cheaper than a 1% quote.
+ * And nothing longer than eleven to one.
  *
- * `multiplierFor` clamps the price it pays at 1%, so a side quoted at 0.4%
- * pays exactly what a 1% side pays while landing less than half as often.
- * Everything below the clamp is strictly dominated by the clamp itself, which
- * is why "priced under 1%" is on the proving ground's list and comes back at
- * a total loss.
+ * Past this the tickets stop being reversals and start being lottery tickets:
+ * a 90x pays out about once in a hundred, so a run of forty losers is an
+ * ordinary evening rather than a signal that anything is wrong. The window
+ * tops out here whatever the measurement says about the tail.
+ */
+export const MAX_MULTIPLIER = 11;
+/**
+ * A quote below 1% can never be reached inside that window anyway, but the
+ * floor stays because `multiplierFor` clamps its price there: a side quoted at
+ * 0.4% pays what a 1% side pays while landing less than half as often, so
+ * everything under the clamp is strictly dominated by the clamp itself.
  */
 export const MIN_QUOTE = 0.01;
-export const MAX_MULTIPLIER = multiplierFor(MIN_QUOTE);
 /** Where the hunt is aimed when nothing better presents itself. */
 export const TARGET_MULTIPLIER = 3;
 
@@ -87,22 +104,25 @@ export const TARGET_MULTIPLIER = 3;
  */
 export function evThresholdFor(aggression: number): number {
   const a = clamp(aggression, 0, 1);
-  // Anchored to a measured duty cycle rather than drawn as a straight line,
-  // because expected value on this board is not spread evenly. Almost
-  // everything on offer sits between -4.5% and -6.5% -- the near-coin-flips
-  // and the 3x band -- so a threshold moving in equal steps does nothing at
-  // all across most of the slider and then everything at the end. Measured
-  // over 400 rounds watched second by second, the share of the time something
-  // clears the bar runs:
+  // Anchored to a measured duty cycle inside the payout window, not drawn as
+  // a straight line.
   //
-  //     -3.0%  5.4%      -5.0%  22.6%
-  //     -4.0%  8.3%      -5.5%  42.7%
-  //     -4.5% 10.5%      -6.0%  70.5%
+  // Everything in the 1.8x-11x window loses money — the board's mispricing
+  // only overtakes the vig out past 20x, which is not what this hunts. So the
+  // question the slider answers is "how close to the best price on offer do
+  // you insist on", and the range spans what the window actually contains:
+  // about -1% at its best, about -6% at its worst.
   //
-  // These points put the slider roughly at 1.5%, 5%, 20%, 50% and 87% of the
-  // time lit, which is a control that feels like it is doing something along
-  // its whole travel.
-  const stops = [0.005, -0.028, -0.0495, -0.0565, -0.075];
+  // Nearly all of it is bunched between -4.5% and -6.5%, so measured over 500
+  // rounds watched second by second the share of the time something clears
+  // the bar runs:
+  //
+  //     -4.5%  1.5%      -5.5%  32.5%
+  //     -5.0% 12.5%      -6.0%  60.4%
+  //
+  // These stops put the slider near 4%, 20%, 38%, 60% and 70% lit, which is a
+  // control that does something along its whole travel.
+  const stops = [-0.048, -0.052, -0.056, -0.06, -0.066];
   const x = a * (stops.length - 1);
   const i = Math.min(stops.length - 2, Math.floor(x));
   return stops[i] + (stops[i + 1] - stops[i]) * (x - i);
@@ -140,9 +160,25 @@ export interface EdgePick {
   note: string;
 }
 
-function gradeFor(ev: number, evCi: number): EdgeGrade {
-  if (ev - evCi > 0) return 'PRIME';
-  if (ev > 0) return 'FAIR';
+/**
+ * How good this is against what actually comes up, which is the only question
+ * worth grading here.
+ *
+ * Nothing in the 1.8x-11x window has positive expected value, so grading
+ * against zero made every ticket THIN and the grade meaningless. Grading
+ * against the window's *range* was no better: its best is about -1% and its
+ * worst about -6%, but almost every moment sits down near the worst, so
+ * thirds-of-the-range is THIN 97% of the time.
+ *
+ * These are thirds of the measured distribution instead. PRIME means this
+ * moment is in roughly the best quarter of the moments the light comes on
+ * for; THIN means it is in the worst half. The strip still prints the real
+ * number with its minus sign — the grade says where it sits among what is on
+ * offer, never that it wins.
+ */
+function gradeFor(ev: number, _evCi: number): EdgeGrade {
+  if (ev > -0.05) return 'PRIME';
+  if (ev > -0.057) return 'FAIR';
   return 'THIN';
 }
 
@@ -238,14 +274,14 @@ function priceAtK(quoted: number, k: number): number {
   return quoted <= 0.5 ? f : 1 - f;
 }
 
-function noteFor(ev: number, evCi: number, secondsLeft: number): string {
-  if (ev - evCi > 0) {
+function noteFor(ev: number, _evCi: number, secondsLeft: number): string {
+  if (ev > -0.05) {
     return secondsLeft <= 60
-      ? 'Priced above its worth, and the interval clears zero — this is the closing-seconds window'
-      : 'Priced above its worth, and the interval clears zero';
+      ? 'About as well priced as this window gets, and the closing minute is where that happens'
+      : 'About as well priced as this window gets';
   }
-  if (ev > 0) return 'Priced above its worth, but not by more than the measurement can resolve';
-  return 'Best price on the board, and still behind the house cut';
+  if (ev > -0.057) return 'Middling for this window — better prices come up';
+  return 'Near the worst of the window. Every price here is behind the house cut, this one more than most';
 }
 
 /** One row of "what every price on the board is worth, right now". */
@@ -257,8 +293,15 @@ export interface EvRow {
   evCi: number;
 }
 
-/** The prices the sheet walks through, from the clamp out to a coin flip. */
-const CURVE_QUOTES = [0.01, 0.02, 0.03, 0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5];
+/**
+ * The prices the sheet walks through: the payout window, end to end.
+ *
+ * 11x is a quote of about 8.3% and 1.8x is about 53%, so these are the ten
+ * rungs of the ladder you can actually buy. It used to start at 1% — a 90x
+ * ticket, outside the window and not on offer — which put the one profitable
+ * row of the table on a price the hunter would never pick.
+ */
+const CURVE_QUOTES = [0.084, 0.1, 0.12, 0.145, 0.175, 0.21, 0.26, 0.33, 0.42, 0.52];
 
 /**
  * What each price on the board is worth at a given moment.
